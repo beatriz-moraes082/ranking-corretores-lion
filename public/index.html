@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ranking de Corretores · Lion Negócios Imobiliários</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topo">
+    <div class="brand">
+      <div class="logo">🦁</div>
+      <div>
+        <h1>Ranking de Corretores</h1>
+        <p>Lion Negócios Imobiliários · dados ao vivo do Supremo CRM</p>
+      </div>
+    </div>
+    <div class="periodo">
+      <div class="chips" id="chips">
+        <button class="chip" data-preset="semana">Semana</button>
+        <button class="chip ativo" data-preset="mes">Mês atual</button>
+        <button class="chip" data-preset="custom">Personalizado</button>
+      </div>
+      <div class="datas oculto" id="datasCustom">
+        <label>De <input type="date" id="inicio" /></label>
+        <label>até <input type="date" id="fim" /></label>
+        <button class="btn" id="aplicar">Aplicar</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="kpis" id="kpis"></section>
+
+    <nav class="tabs" id="tabs">
+      <button class="tab ativo" data-tab="corretores">🏆 Corretores</button>
+      <button class="tab" data-tab="qualificadores">🎧 Qualificadores</button>
+      <button class="tab" data-tab="origens">📣 Origens</button>
+      <button class="tab" data-tab="funil">🔻 Funil & Perdas</button>
+      <button class="tab" data-tab="alertas">🚨 Alertas</button>
+    </nav>
+
+    <section id="conteudo">
+      <div class="carregando" id="carregando">Carregando dados do Supremo CRM…</div>
+    </section>
+  </main>
+
+  <footer class="rodape">
+    <span id="rodapeInfo"></span>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>
