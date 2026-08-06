@@ -1,4 +1,4 @@
-# 🦁 Ranking de Corretores — Lion Negócios Imobiliários
+# 🦁 Elite Lion — Ranking de Performance dos Corretores
 
 Painel de **ranking de performance dos corretores**, integrado à **API aberta do
 Supremo CRM**. Pensado para ficar passando numa TV da imobiliária: bem visual,
