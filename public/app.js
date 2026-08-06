@@ -195,13 +195,13 @@ function render() {
 
   /* Ranking completo */
   const cols = [
-    { key: "score", lab: "Score", sortable: true },
-    { key: "vendas", lab: "Vendas", sortable: true },
-    { key: "vgv", lab: "VGV", sortable: true, hide: true },
-    { key: "conversao", lab: "Conversão", sortable: true },
-    { key: "leads", lab: "Leads", sortable: true, hide: true },
-    { key: "contato", lab: "1º contato", sortable: true },
-    { key: "parados15d", lab: "Parados +15d", sortable: true },
+    { key: "score", lab: "Score" },
+    { key: "leads", lab: "Leads" },
+    { key: "contato", lab: "1º contato" },
+    { key: "vendas", lab: "Vendas" },
+    { key: "vgv", lab: "VGV", hide: true },
+    { key: "conversao", lab: "Conversão" },
+    { key: "parados15d", lab: "Parados +15d" },
   ];
   const valOrd = (p, key) => key === "score" ? p.score : key === "contato" ? (p.c.tempoQualifHoras == null ? 1e9 : p.c.tempoQualifHoras) : p.c[key] ?? 0;
   const asc = estado.ord === "contato" || estado.ord === "parados15d"; // menor é melhor
@@ -228,11 +228,11 @@ function render() {
         <span><span class="rk-nome">${p.c.nome.trim()}</span><br><span class="rk-sub">${p.c.leads} leads · ${p.c.movimentados} movim.</span></span>
       </div></td>
       <td><span class="score-cell">${p.score}</span><span class="mini-bar"><i style="width:${(p.score / maxScore) * 100}%"></i></span></td>
+      <td><span class="cell-num">${p.c.leads}</span></td>
+      <td><span class="cell-num">${p.c.tempoQualifHoras == null ? "—" : p.c.tempoQualifHoras + "h"}</span></td>
       <td><span class="cell-num">${p.c.vendas}</span></td>
       <td class="hide-sm"><span class="cell-num">${brlK(p.c.vgv)}</span></td>
       <td><span class="pill ${p.c.conversao >= 3 ? "g" : "n"}">${p.c.conversao}%</span></td>
-      <td class="hide-sm"><span class="cell-num">${p.c.leads}</span></td>
-      <td><span class="cell-num">${p.c.tempoQualifHoras == null ? "—" : p.c.tempoQualifHoras + "h"}</span></td>
       <td>${p.c.parados15d ? `<span class="pill r">${p.c.parados15d}</span>` : `<span class="pill n">0</span>`}</td>
     </tr>`;
   }).join("");
