@@ -1,29 +1,37 @@
 # 🦁 Ranking de Corretores — Lion Negócios Imobiliários
 
-Painel de ranking e análises de corretores, integrado à **API aberta do Supremo CRM**.
-Feito para ser visto por toda a imobiliária: mostra quem mais vende, quem responde
-mais rápido, quais leads estão parados e de onde vêm os melhores negócios.
+Painel de **ranking de performance dos corretores**, integrado à **API aberta do
+Supremo CRM**. Pensado para ficar passando numa TV da imobiliária: bem visual,
+legível de longe, com **tema claro e escuro**.
 
 Sem dependências externas — roda com Node.js puro (nativo).
 
 ---
 
-## O que o painel mostra
+## O que o painel mostra (página única, foco no corretor)
 
-**Indicadores do topo (KPIs):** leads no período, vendas fechadas, VGV (volume vendido),
-ticket médio e leads parados há mais de 15 dias.
+- **KPIs** — leads no período, vendas fechadas, VGV (volume vendido), ticket médio e
+  leads parados +15 dias, com números animados.
+- **🏆 Pódio do período** — top 3 corretores por *Score de Performance*.
+- **Ranking completo** — tabela ordenável por Score, vendas, VGV, conversão, leads,
+  1º contato e parados +15d. Linha do líder destacada.
+- **Perfil comportamental** — um radar por corretor com 6 dimensões (Volume, Vendas,
+  Conversão, 1º contato, Movimentação, Consistência) e destaques de **fortes** e
+  **a melhorar** — inspirado no perfil de SDRs.
+- **🚨 Leads parados +15 dias** — ativos sem movimentação há +15 dias, com nome,
+  telefone e corretor responsável.
 
-**Abas:**
+**Filtro de período:** Semana · Mês atual · Personalizado. **Auto-refresh** a cada 3 min
+(modo TV) e alternância de **tema claro/escuro** (botão no topo, padrão escuro).
 
-| Aba | O que traz |
-|-----|-----------|
-| 🏆 **Corretores** | Ranking por vendas, VGV, conversão, volume de leads, movimentação, tempo de qualificação e leads parados. Clique no cabeçalho pra reordenar. |
-| 🎧 **Qualificadores** | Ranking do time de pré-atendimento: quantos leads qualificaram, tempo médio de resposta e quantos viraram venda. |
-| 📣 **Origens** | Desempenho por canal de origem (Instagram, portais, etc.): leads, vendas e conversão. |
-| 🔻 **Funil & Perdas** | Distribuição dos leads por etapa, principais motivos de perda e volume diário de captação. |
-| 🚨 **Alertas** | Leads **ativos parados há mais de 15 dias** sem movimentação, com nome, telefone e corretor responsável. |
+### Score de Performance
 
-**Filtro de período:** Semana · Mês atual · Personalizado (intervalo à escolha).
+Índice de 0 a 100 que combina, normalizado entre os corretores do período:
+vendas (28%), conversão (20%), volume (16%), 1º contato (16%), movimentação (10%) e
+consistência (10%). É o que ordena o pódio e o ranking por padrão.
+
+> **1º contato** = tempo entre a captura do lead e a qualificação (quando o time faz o
+> primeiro contato). Quanto menor, mais rápido o lead é atendido.
 
 ---
 
