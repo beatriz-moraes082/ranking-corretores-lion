@@ -1,4 +1,4 @@
-/* Ranking de Corretores — Lion. Frontend (sem dependências). */
+/* Ranking de Corretores, Lion. Frontend (sem dependências). */
 const $ = (s, r = document) => r.querySelector(s);
 const PALETA = ["#f0a51e", "#8b5cf6", "#3b82f6", "#10b981", "#ec4899", "#f97316"];
 const num = (n) => (n || 0).toLocaleString("pt-BR");
@@ -9,7 +9,17 @@ const brlK = (n) => {
   return "R$ " + num(n);
 };
 
-let estado = { data: null, ord: "score", refreshTimer: null };
+let estado = { data: null, ord: "score", view: "ranking", refreshTimer: null };
+
+// textos de como cada dimensão é medida (aba metodologia)
+const DIM_DESC = {
+  volume: "Nº de leads recebidos no período.",
+  vendas: "Nº de vendas fechadas (leads que viraram venda).",
+  conversao: "Vendas ÷ leads recebidos.",
+  contato: "Tempo entre a captura do lead e a qualificação, quanto menor, mais rápido o 1º contato.",
+  mov: "Leads trabalhados ÷ leads recebidos (saíram de 'novos').",
+  consist: "Leads parados +15 dias por lead, quanto menos, melhor.",
+};
 
 /* ---------- tema ---------- */
 (function initTema() {
@@ -40,7 +50,7 @@ const DIMS = [
   { key: "volume", label: "Volume", short: "Volume", raw: (c) => c.leads, disp: (c) => `${c.leads} leads` },
   { key: "vendas", label: "Vendas", short: "Vendas", raw: (c) => c.vendas, disp: (c) => `${c.vendas} vendas` },
   { key: "conversao", label: "Conversão", short: "Conv.", raw: (c) => c.conversao, disp: (c) => `${c.conversao}%` },
-  { key: "contato", label: "1º contato", short: "1º contato", raw: (c) => (c.tempoQualifHoras == null ? null : -c.tempoQualifHoras), disp: (c) => (c.tempoQualifHoras == null ? "—" : `${c.tempoQualifHoras}h`) },
+  { key: "contato", label: "1º contato", short: "1º contato", raw: (c) => (c.tempoQualifHoras == null ? null : -c.tempoQualifHoras), disp: (c) => (c.tempoQualifHoras == null ? "n/d" : `${c.tempoQualifHoras}h`) },
   { key: "mov", label: "Movimentação", short: "Movim.", raw: (c) => (c.leads ? c.movimentados / c.leads : 0), disp: (c) => `${Math.round((c.leads ? c.movimentados / c.leads : 0) * 100)}%` },
   { key: "consist", label: "Consistência", short: "Consist.", raw: (c) => (c.leads ? -(c.parados15d / c.leads) : 0), disp: (c) => `${c.parados15d} parados` },
 ];
@@ -143,6 +153,13 @@ async function carregar({ soft = false } = {}) {
 function render() {
   const d = estado.data;
   const perfis = calcularPerfis(d.corretores);
+  document.querySelectorAll(".view-tab").forEach((t) => t.classList.toggle("ativo", t.dataset.view === estado.view));
+  if (estado.view === "metodo") return renderMetodo(perfis);
+  if (estado.view === "perfil") return renderPerfil(perfis);
+  renderRanking(d, perfis);
+}
+
+function renderRanking(d, perfis) {
   const byNome = Object.fromEntries(perfis.map((p, i) => [p.c.nome, { ...p, i }]));
   const c = $("#conteudo");
   c.innerHTML = "";
@@ -185,7 +202,7 @@ function render() {
         <div class="pod-stats">
           <div><b>${p.c.vendas}</b><span>vendas</span></div>
           <div><b>${p.c.conversao}%</b><span>conv.</span></div>
-          <div><b>${p.c.tempoQualifHoras == null ? "—" : p.c.tempoQualifHoras + "h"}</b><span>1º contato</span></div>
+          <div><b>${p.c.tempoQualifHoras == null ? "n/d" : p.c.tempoQualifHoras + "h"}</b><span>1º contato</span></div>
         </div>
       </div>`;
     }).join("");
@@ -229,7 +246,7 @@ function render() {
       </div></td>
       <td><span class="score-cell">${p.score}</span><span class="mini-bar"><i style="width:${(p.score / maxScore) * 100}%"></i></span></td>
       <td><span class="cell-num">${p.c.leads}</span></td>
-      <td><span class="cell-num">${p.c.tempoQualifHoras == null ? "—" : p.c.tempoQualifHoras + "h"}</span></td>
+      <td><span class="cell-num">${p.c.tempoQualifHoras == null ? "n/d" : p.c.tempoQualifHoras + "h"}</span></td>
       <td><span class="cell-num">${p.c.vendas}</span></td>
       <td class="hide-sm"><span class="cell-num">${brlK(p.c.vgv)}</span></td>
       <td><span class="pill ${p.c.conversao >= 3 ? "g" : "n"}">${p.c.conversao}%</span></td>
@@ -240,31 +257,6 @@ function render() {
   wrap.querySelectorAll("th[data-k]").forEach((th) => th.addEventListener("click", () => { estado.ord = th.dataset.k; render(); }));
   sec2.appendChild(wrap);
   c.appendChild(sec2);
-
-  /* Perfil comportamental (radar) */
-  if (perfis.length) {
-    const sec3 = document.createElement("section");
-    sec3.className = "secao";
-    sec3.innerHTML = `<div class="secao-hd"><h2>Perfil comportamental</h2><span>6 dimensões, normalizadas entre os corretores do período</span></div>`;
-    const grid = document.createElement("div");
-    grid.className = "radar-grid";
-    grid.innerHTML = perfis.slice(0, 6).map((p, i) => {
-      const cor = corDe(i);
-      return `<div class="radar-card anim" style="animation-delay:${i * 70}ms">
-        <div class="radar-hd">
-          <span class="rk-av" style="background:linear-gradient(150deg,${cor},${cor}bb)">${iniciais(p.c.nome)}</span>
-          <div><div class="n">${p.c.nome.trim()}</div><div class="s">score ${p.score} · ${p.c.vendas} vendas · 1º contato ${p.c.tempoQualifHoras == null ? "—" : p.c.tempoQualifHoras + "h"}</div></div>
-        </div>
-        ${radarSVG(p.dims, cor)}
-        <div class="radar-legend">
-          <div class="up"><h4>▲ Fortes</h4><p>${p.fortes.map((f) => `<b>${f.label}</b> ${f.v}`).join("<br>")}</p></div>
-          <div class="down"><h4>▼ A melhorar</h4><p>${p.melhorar.map((f) => `<b>${f.label}</b> ${f.v}`).join("<br>")}</p></div>
-        </div>
-      </div>`;
-    }).join("");
-    sec3.appendChild(grid);
-    c.appendChild(sec3);
-  }
 
   /* Alertas */
   const sec4 = document.createElement("section");
@@ -279,7 +271,7 @@ function render() {
       <div class="alerta-dias"><b>${a.diasParado}</b><span>dias</span></div>
       <div class="alerta-info">
         <div class="l">${a.lead} ${a.telefone ? `<span class="alerta-tel">· ${a.telefone}</span>` : ""}</div>
-        <div class="m">👤 ${a.corretor.trim()} · ${a.etapa || ""}${a.situacao ? " · " + a.situacao : ""}</div>
+        <div class="m"><span class="tag-corr">${a.corretor.trim()}</span>${a.etapa ? " · " + a.etapa : ""}${a.situacao ? " · " + a.situacao : ""}</div>
       </div>
     </div>`).join("");
   sec4.appendChild(box);
@@ -303,7 +295,126 @@ function render() {
   });
 }
 
+/* ---------- render: aba "perfil comportamental" (todos os corretores) ---------- */
+function radarCardHTML(p, i) {
+  const cor = corDe(i);
+  return `<div class="radar-card anim" style="animation-delay:${Math.min(i, 11) * 45}ms">
+    <div class="radar-hd">
+      <span class="rk-av" style="background:linear-gradient(150deg,${cor},${cor}bb)">${iniciais(p.c.nome)}</span>
+      <div><div class="n">${p.c.nome.trim()}</div><div class="s">score ${p.score} · ${p.c.vendas} vendas · 1º contato ${p.c.tempoQualifHoras == null ? "n/d" : p.c.tempoQualifHoras + "h"}</div></div>
+    </div>
+    ${radarSVG(p.dims, cor)}
+    <div class="radar-legend">
+      <div class="up"><h4>▲ Fortes</h4><p>${p.fortes.map((f) => `<b>${f.label}</b> ${f.v}`).join("<br>")}</p></div>
+      <div class="down"><h4>▼ A melhorar</h4><p>${p.melhorar.map((f) => `<b>${f.label}</b> ${f.v}`).join("<br>")}</p></div>
+    </div>
+  </div>`;
+}
+
+function renderPerfil(perfis) {
+  const c = $("#conteudo");
+  c.innerHTML = "";
+  const sec = document.createElement("section");
+  sec.innerHTML = `<div class="secao-hd" style="margin-top:6px"><h2>Perfil comportamental</h2><span>${perfis.length} corretores · 6 dimensões, normalizadas entre os corretores do período</span></div>`;
+  const grid = document.createElement("div");
+  grid.className = "radar-grid";
+  grid.innerHTML = perfis.length ? perfis.map((p, i) => radarCardHTML(p, i)).join("") : `<div class="vazio">Sem corretores com leads no período.</div>`;
+  sec.appendChild(grid);
+  c.appendChild(sec);
+}
+
+/* ---------- render: aba "como o score é calculado" ---------- */
+function renderMetodo(perfis) {
+  const c = $("#conteudo");
+  c.innerHTML = "";
+  const ordPeso = [...DIMS].sort((a, b) => (PESOS[b.key] || 0) - (PESOS[a.key] || 0));
+
+  // 1) intro
+  const intro = document.createElement("section");
+  intro.className = "anim";
+  intro.innerHTML = `<div class="card">
+    <div class="big-note">O <em>Score de Performance</em> é uma nota de <em>0 a 100</em> que resume 6 métricas do corretor num número só.</div>
+    <p style="margin-top:14px">É <b>relativo ao grupo do período</b>: cada corretor é comparado com os outros que tiveram leads naquele intervalo. Em cada métrica, o melhor do grupo vira 100, o pior vira 0, e o resto fica proporcional no meio. Depois somamos essas notas com pesos diferentes.</p>
+  </div>`;
+  c.appendChild(intro);
+
+  // 2) dimensões e pesos
+  const dims = document.createElement("section");
+  dims.className = "secao anim";
+  dims.style.animationDelay = "70ms";
+  dims.innerHTML = `<div class="secao-hd"><h2>As 6 dimensões e seus pesos</h2><span>somam 100%</span></div>`;
+  const cardD = document.createElement("div");
+  cardD.className = "card";
+  cardD.innerHTML = ordPeso.map((d, i) => {
+    const peso = Math.round((PESOS[d.key] || 0) * 100);
+    return `<div class="dim-row">
+      <span class="dim-dot" style="background:${PALETA[i % PALETA.length]}"></span>
+      <span class="dim-nome">${d.label}</span>
+      <span class="dim-desc">${DIM_DESC[d.key]}</span>
+      <span class="peso-track"><i style="width:${peso / 28 * 100}%"></i></span>
+      <span class="dim-peso">${peso}%</span>
+    </div>`;
+  }).join("");
+  dims.appendChild(cardD);
+  c.appendChild(dims);
+
+  // 3) exemplo real com o líder
+  if (perfis.length) {
+    const lider = perfis[0];
+    const linhas = DIMS.map((d) => ({
+      label: d.label, valor: d.disp(lider.c),
+      nota: lider.dims[d.key], peso: Math.round((PESOS[d.key] || 0) * 100),
+      contrib: lider.dims[d.key] * (PESOS[d.key] || 0),
+    })).sort((a, b) => b.contrib - a.contrib);
+    const total = linhas.reduce((s, l) => s + l.contrib, 0);
+
+    const ex = document.createElement("section");
+    ex.className = "secao anim";
+    ex.style.animationDelay = "140ms";
+    ex.innerHTML = `<div class="secao-hd"><h2>Exemplo real, ${lider.c.nome.trim()}</h2><span>líder do período, calculado ao vivo</span></div>`;
+    const wrap = document.createElement("div");
+    wrap.className = "tabela-wrap";
+    wrap.innerHTML = `<table>
+      <thead><tr><th>Dimensão</th><th>Valor real</th><th>Nota 0 a 100</th><th>Peso</th><th>Contribui</th></tr></thead>
+      <tbody>
+        ${linhas.map((l) => `<tr>
+          <td style="font-weight:700">${l.label}</td>
+          <td class="cell-num">${l.valor}</td>
+          <td class="cell-num">${l.nota}</td>
+          <td class="cell-num">${l.peso}%</td>
+          <td class="cell-num">${l.contrib.toFixed(1)}</td>
+        </tr>`).join("")}
+        <tr class="exemplo-total">
+          <td>Score final</td><td></td><td></td><td></td><td>${Math.round(total)}</td>
+        </tr>
+      </tbody></table>`;
+    ex.appendChild(wrap);
+    c.appendChild(ex);
+  }
+
+  // 4) pontos importantes
+  const cav = document.createElement("section");
+  cav.className = "secao anim";
+  cav.style.animationDelay = "200ms";
+  cav.innerHTML = `<div class="secao-hd"><h2>Pontos importantes</h2></div>`;
+  const cardC = document.createElement("div");
+  cardC.className = "card";
+  cardC.innerHTML = `<ul class="caveats">
+    <li><b>É relativo, não absoluto.</b> O mesmo corretor pode ter score diferente se você muda o período ou o conjunto de colegas comparados.</li>
+    <li><b>1º contato</b> é o tempo entre a captura do lead e a qualificação, quanto menor, melhor a nota.</li>
+    <li><b>Consistência</b> é medida por lead: um corretor com muitos leads e alguns parados pode pontuar melhor que outro com poucos leads e vários parados.</li>
+    <li><b>Os pesos são ajustáveis.</b> Se para a Lion vale mais volume, ou punir mais os leads parados, é só recalibrar.</li>
+  </ul>`;
+  cav.appendChild(cardC);
+  c.appendChild(cav);
+}
+
 /* ---------- eventos ---------- */
+$("#views").addEventListener("click", (e) => {
+  const b = e.target.closest(".view-tab"); if (!b) return;
+  estado.view = b.dataset.view;
+  if (estado.data) render();
+});
 $("#chips").addEventListener("click", (e) => {
   const b = e.target.closest(".chip"); if (!b) return;
   $(".chip.ativo").classList.remove("ativo"); b.classList.add("ativo");
