@@ -89,7 +89,7 @@ main, .topbar, .rodape { position: relative; z-index: 1; }
   background: linear-gradient(150deg, var(--gold-2), var(--gold));
   box-shadow: 0 10px 26px rgba(240, 165, 30, 0.4);
 }
-.logo img { width: 74%; height: 74%; object-fit: contain; display: block; }
+.logo img { width: 62%; height: 62%; object-fit: contain; display: block; }
 .brand-txt h1 {
   font-family: var(--font-disp); font-weight: 800; font-size: clamp(20px, 2.4vw, 30px);
   letter-spacing: -0.02em; line-height: 1;
