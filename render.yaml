@@ -1,0 +1,21 @@
+# Blueprint do Render — cria o serviço web do painel automaticamente.
+# O Render lê este arquivo e só pede o token do Supremo (SUPREMO_TOKEN).
+services:
+  - type: web
+    name: elite-lion
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: SUPREMO_TOKEN
+        sync: false   # o Render pede este valor na hora (fica guardado como segredo)
+      - key: CACHE_TTL_MIN
+        value: "15"
+      - key: ALERTA_DIAS
+        value: "45"

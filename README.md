@@ -6,6 +6,17 @@ legível de longe, com **tema claro e escuro**.
 
 Sem dependências externas — roda com Node.js puro (nativo).
 
+## Publicar online (1 clique)
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/beatriz-moraes082/ranking-corretores-lion)
+
+Ao clicar, o Render lê o arquivo `render.yaml` e configura tudo sozinho. Você só
+precisa **colar o token do Supremo CRM** no campo `SUPREMO_TOKEN` e confirmar. Em
+poucos minutos você recebe um link fixo (ex.: `https://elite-lion.onrender.com`).
+
+> No plano gratuito o serviço "dorme" após 15 min sem acesso e demora ~1 min pra
+> voltar. Com a TV aberta (o painel se atualiza sozinho a cada 3 min) ele fica acordado.
+
 ---
 
 ## O que o painel mostra (página única, foco no corretor)
