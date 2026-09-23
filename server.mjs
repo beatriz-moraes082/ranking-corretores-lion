@@ -181,7 +181,11 @@ const server = createServer(async (req, res) => {
       res.writeHead(403); return res.end("Forbidden");
     }
     const buf = await readFile(filePath);
-    res.writeHead(200, { "content-type": MIME[extname(filePath)] || "application/octet-stream" });
+    res.writeHead(200, {
+      "content-type": MIME[extname(filePath)] || "application/octet-stream",
+      // Sempre revalida: garante que atualizações do painel apareçam sem cache preso.
+      "cache-control": "no-cache, must-revalidate",
+    });
     res.end(buf);
   } catch (err) {
     if (err?.code === "ENOENT") {
