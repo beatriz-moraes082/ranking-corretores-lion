@@ -760,11 +760,10 @@ async function carregarEvolucao() {
 }
 
 /* ---------- modo TV ---------- */
-// O link principal abre aqui: uma pergunta por tela, letra grande, telas que passam
-// sozinhas. Pensado pra ser entendido de longe por todo mundo da imobiliária.
+// O link principal abre aqui: uma pergunta por tela, telas que passam sozinhas.
+// Estilo "galeria clara": fundo off-white da Lion, tipografia fina, linhas finas e
+// uma cor de destaque por tela (a cor varia, o fundo não).
 const TV_SEG = 15; // segundos por tela
-const COROA = `<svg class="tv-coroa" viewBox="0 0 64 44" aria-hidden="true"><path d="M4 40h56l-5-30-13 11-10-19-10 19L9 10z" fill="currentColor"/><circle cx="4" cy="9" r="4" fill="currentColor"/><circle cx="32" cy="3" r="3.5" fill="currentColor"/><circle cx="60" cy="9" r="4" fill="currentColor"/></svg>`;
-const tvAv = (nome, cls = "") => `<span class="tv-av ${cls}">${iniciais(nome)}</span>`;
 const tvNome = (nome) => esc(nomeCurtoTV(nome));
 function nomeCurtoTV(nome) {
   const p = nome.trim().split(/\s+/);
@@ -773,78 +772,73 @@ function nomeCurtoTV(nome) {
 }
 function rotuloPeriodo() {
   const preset = $(".chip.ativo")?.dataset.preset;
-  return preset === "semana" ? "últimos 7 dias" : preset === "custom" ? "período escolhido" : "este mês";
+  if (preset === "semana") return "últimos 7 dias";
+  if (preset === "custom") return "período escolhido";
+  return new Date().toLocaleDateString("pt-BR", { month: "long" });
 }
 
-// Tela de ranking por uma métrica: pódio à esquerda, 4º ao 10º à direita.
-function telaRanking({ lista, valor, fmt, unid, rodape, vazioDir = "" }) {
+// Ranking por uma métrica: pódio em colunas à esquerda, 4º ao 10º à direita.
+function telaRanking({ lista, valor, fmt, unid, vazioDir = "" }) {
   const top = lista.slice(0, 3), resto = lista.slice(3, 10);
-  const max = Math.max(1, ...lista.slice(0, 10).map(valor));
-  const ordem = [1, 0, 2].filter((i) => top[i]);
-  const podio = ordem.map((i) => {
+  const alturas = [9, 6, 4]; // 1º mais alto
+  const podio = [1, 0, 2].filter((i) => top[i]).map((i) => {
     const c = top[i];
-    return `<div class="tv-pod p${i + 1}">
-      ${i === 0 ? COROA : ""}
-      ${tvAv(c.nome, i === 0 ? "ouro" : "")}
-      <div class="tv-pod-pos">${i + 1}º</div>
-      <div class="tv-pod-nome">${tvNome(c.nome)}</div>
-      <div class="tv-pod-val">${fmt(valor(c))}<small>${unid(valor(c))}</small></div>
-      <div class="tv-degrau"></div>
+    return `<div class="tvb-pd p${i + 1}">
+      <span class="tvb-pd-pos">${i + 1}º lugar</span>
+      <span class="tvb-pd-nome">${tvNome(c.nome)}</span>
+      <span class="tvb-pd-val">${fmt(valor(c))}<small>${unid(valor(c))}</small></span>
+      <span class="tvb-pd-col" style="height:calc(var(--u) * ${alturas[i]})"></span>
     </div>`;
   }).join("");
-  const linhas = resto.map((c, j) => `<div class="tv-linha">
-      <span class="tv-pos">${j + 4}º</span>
-      <span class="tv-ln-nome">${tvNome(c.nome)}</span>
-      <span class="tv-barra"><i style="width:${Math.max(2, (100 * valor(c)) / max)}%"></i></span>
-      <span class="tv-ln-val">${fmt(valor(c))}</span>
+  const linhas = resto.map((c, j) => `<div class="tvb-ln">
+      <span class="tvb-ln-pos">${j + 4}º</span>
+      <span class="tvb-ln-nome">${tvNome(c.nome)}</span>
+      <span class="tvb-ln-val">${fmt(valor(c))}</span>
     </div>`).join("");
-  return `<div class="tv-split">
-      <div class="tv-esq"><div class="tv-podio">${podio}</div></div>
-      <div class="tv-dir">${linhas || `<div class="tv-recado"><b>${lista.length === 1 ? "Só 1 corretor" : `Só ${lista.length} corretores`}</b> aparece${lista.length === 1 ? "" : "m"} neste ranking por enquanto.${vazioDir ? `<span>${vazioDir}</span>` : ""}</div>`}
-        ${lista.length > 10 ? `<div class="tv-mais">+ ${lista.length - 10} corretores no painel</div>` : ""}</div>
-    </div>
-    ${rodape ? `<div class="tv-rodape-tela">${rodape}</div>` : ""}`;
+  return `<div class="tvb-duo">
+      <div class="tvb-podio">${podio}</div>
+      <div class="tvb-lista">${linhas ? linhas + (lista.length > 10 ? `<div class="tvb-mais">+ ${lista.length - 10} corretores no painel completo</div>` : "")
+        : `<div class="tvb-recado"><p><b>${lista.length === 1 ? "Só 1 corretor aparece" : `Só ${lista.length} corretores aparecem`}</b> neste ranking por enquanto.</p>${vazioDir ? `<p class="tvb-recado-ac">${vazioDir}</p>` : ""}</div>`}</div>
+    </div>`;
 }
 
 function telasTV(d) {
   const perfis = calcularPerfis(d.corretores).filter((p) => naEquipe(p.c.nome));
   const cs = d.corretores.filter((x) => naEquipe(x.nome));
   const per = rotuloPeriodo();
+  const grupo = equipeAtual() ? equipeAtual().nome : "Lion";
+  const sub = (extra) => `${per.charAt(0).toUpperCase() + per.slice(1)}${extra ? ` · ${extra}` : ""}`;
   const telas = [];
 
   // 1) corretor destaque
   if (perfis.length) {
     const [p1, p2, p3] = perfis;
+    const stat = (v, um, varios) => `<div class="tvb-dq-stat"><b>${num(v)}</b><span>${v === 1 ? um : varios}</span></div>`;
     telas.push({
-      id: "destaque", nome: "Destaque",
-      titulo: `Corretor destaque · ${per}`,
-      html: `<div class="tv-destaque">
-        <div class="tv-dq-esq">
-          ${COROA}
-          <div class="tv-dq-rot">1º lugar no score</div>
-          <div class="tv-dq-nome">${tvNome(p1.c.nome)}</div>
-          <div class="tv-dq-score"><b>${p1.score}</b><span>pontos<br>de 100</span></div>
+      id: "destaque", nome: "Destaque", titulo: "Corretor destaque", sub: sub(`${grupo}`),
+      rodape: "O destaque é quem tem o maior score do período",
+      html: `<div class="tvb-dq">
+        <div>
+          <span class="tvb-kicker">1º lugar no score</span>
+          <h2 class="tvb-dq-nome">${tvNome(p1.c.nome)}</h2>
+          <div class="tvb-dq-score"><b>${p1.score}</b><span>pontos<br>de 100</span></div>
         </div>
-        <div class="tv-dq-dir">
-          <div class="tv-dq-stat"><b>${num(p1.c.propostas || 0)}</b><span>${(p1.c.propostas || 0) === 1 ? "proposta" : "propostas"}</span></div>
-          <div class="tv-dq-stat"><b>${num(p1.c.vendas)}</b><span>${p1.c.vendas === 1 ? "venda fechada" : "vendas fechadas"}</span></div>
-          <div class="tv-dq-stat"><b>${num(p1.c.leads)}</b><span>leads recebidos</span></div>
+        <div class="tvb-dq-lado">
+          ${stat(p1.c.propostas || 0, "proposta", "propostas")}
+          ${stat(p1.c.vendas, "venda fechada", "vendas fechadas")}
+          ${stat(p1.c.leads, "lead recebido", "leads recebidos")}
+          <div class="tvb-dq-cola">${p2 ? `<span>2º ${tvNome(p2.c.nome)} <b>${p2.score}</b></span>` : ""}${p3 ? `<span>3º ${tvNome(p3.c.nome)} <b>${p3.score}</b></span>` : ""}</div>
         </div>
-      </div>
-      <div class="tv-rodape-tela">${p2 ? `Na cola: <b>2º ${tvNome(p2.c.nome)}</b> · ${p2.score} pts` : ""}${p3 ? ` &nbsp;&nbsp; <b>3º ${tvNome(p3.c.nome)}</b> · ${p3.score} pts` : ""}</div>`,
+      </div>`,
     });
   }
 
   // 2) ranking geral (score)
   if (perfis.length) {
     telas.push({
-      id: "score", nome: "Ranking geral",
-      titulo: `Ranking geral · ${per}`,
-      html: telaRanking({
-        lista: perfis.map((p) => ({ nome: p.c.nome, score: p.score })), valor: (c) => c.score,
-        fmt: (v) => num(v), unid: () => "pts",
-        rodape: `O <b>score</b> vai de 0 a 100 e junta: <b>vendas</b> 35% · <b>propostas</b> 30% · <b>conversão</b> 20% · <b>leads em dia</b> 15%`,
-      }),
+      id: "score", nome: "Ranking geral", titulo: "Ranking geral", sub: sub(`${perfis.length} corretores`),
+      rodape: "Score de 0 a 100 · vendas 35% · propostas 30% · conversão 20% · leads em dia 15%",
+      html: telaRanking({ lista: perfis.map((p) => ({ nome: p.c.nome, score: p.score })), valor: (c) => c.score, fmt: num, unid: () => "pts" }),
     });
   }
 
@@ -852,12 +846,11 @@ function telasTV(d) {
   const comProposta = cs.filter((x) => (x.propostas || 0) > 0).sort((a, b) => b.propostas - a.propostas);
   if (comProposta.length) {
     telas.push({
-      id: "propostas", nome: "Propostas",
-      titulo: `Quem mais fez propostas · ${per}`,
+      id: "propostas", nome: "Propostas", titulo: "Quem mais fez propostas", sub: sub(`${comProposta.length} ${comProposta.length === 1 ? "corretor" : "corretores"}`),
+      rodape: "Conta os leads do período que chegaram em Proposta ou já viraram venda",
       html: telaRanking({
-        lista: comProposta, valor: (c) => c.propostas, fmt: (v) => num(v), unid: (v) => (v === 1 ? "proposta" : "propostas"),
-        rodape: "Conta os leads do período que chegaram em <b>Proposta</b> ou já viraram venda",
-        vazioDir: "Proposta vale 30% do score. Cada proposta registrada no Supremo te leva pra cima no ranking.",
+        lista: comProposta, valor: (c) => c.propostas, fmt: num, unid: (v) => (v === 1 ? "proposta" : "propostas"),
+        vazioDir: "Proposta vale 30% do score. Cada proposta registrada no Supremo leva você pra cima no ranking.",
       }),
     });
   }
@@ -866,11 +859,10 @@ function telasTV(d) {
   const comVenda = cs.filter((x) => x.vendas > 0).sort((a, b) => b.vendas - a.vendas || b.vgv - a.vgv);
   if (comVenda.length) {
     telas.push({
-      id: "vendas", nome: "Vendas",
-      titulo: `Quem mais vendeu · ${per}`,
+      id: "vendas", nome: "Vendas", titulo: "Quem mais vendeu", sub: sub(`VGV ${brlK(comVenda.reduce((s, x) => s + x.vgv, 0))}`),
+      rodape: "Vendas registradas no Supremo no período",
       html: telaRanking({
-        lista: comVenda, valor: (c) => c.vendas, fmt: (v) => num(v), unid: (v) => (v === 1 ? "venda" : "vendas"),
-        rodape: `Vendas registradas no Supremo no período · VGV total <b>${brlK(comVenda.reduce((s, x) => s + x.vgv, 0))}</b>`,
+        lista: comVenda, valor: (c) => c.vendas, fmt: num, unid: (v) => (v === 1 ? "venda" : "vendas"),
         vazioDir: "Venda vale 35% do score. Lembre de marcar o lead como vendido no Supremo.",
       }),
     });
@@ -880,20 +872,20 @@ function telasTV(d) {
   const f = somaFunil(cs.filter((x) => x.funil && x.leads > 0).map((x) => x.funil));
   if (f[0]) {
     const etapas = d.etapasFunil || ETAPAS_PADRAO;
-    const de100 = (v) => Math.round((100 * v) / f[0]);
+    const de100 = (v) => { const r = (100 * v) / f[0]; return v && r < 1 ? "&lt;1" : Math.round(r); };
     const pior = piorPassagemTV(f);
     telas.push({
-      id: "funil", nome: "Funil",
-      titulo: `Funil da ${equipeAtual() ? esc(equipeAtual().nome) : "imobiliária"} · ${per}`,
-      html: `<div class="tv-funil">
-        <div class="tv-fn-intro">De cada <b>100</b> leads que chegam ao corretor…</div>
-        ${etapas.map((e, i) => `<div class="tv-fn-linha">
-          <span class="tv-fn-etapa">${e}</span>
-          <span class="tv-fn-faixa">${(() => { const w = (100 * f[i]) / f[0]; return w >= 12 ? `<i style="width:${w}%"><b>${num(f[i])}</b></i>` : `<i style="width:${Math.max(1.2, w)}%"></i><b class="fora">${num(f[i])}</b>`; })()}</span>
-          <span class="tv-fn-100">${i ? `<b>${de100(f[i]) < 1 && f[i] ? "&lt;1" : de100(f[i])}</b> de 100` : "<b>100</b> de 100"}</span>
+      id: "funil", nome: "Funil", titulo: "Funil de vendas", sub: sub(`${num(f[0])} leads qualificados`),
+      rodape: pior ? `Onde mais perdemos: ${etapas[pior.i - 1]} → ${etapas[pior.i]} · só ${pct(pior.t)} avançam` : "Atualize a situação do lead no Supremo a cada passo",
+      html: `<div class="tvb-fn">
+        <p class="tvb-fn-intro">De cada <b>100</b> leads que chegam ao corretor…</p>
+        ${etapas.map((e, i) => `<div class="tvb-fn-ln">
+          <span class="tvb-fn-etapa">${e}</span>
+          <span class="tvb-fn-trilho"><i style="width:${Math.max(0.6, (100 * f[i]) / f[0])}%"></i></span>
+          <span class="tvb-fn-100"><b>${de100(f[i])}</b> de 100</span>
+          <span class="tvb-fn-qtd">${num(f[i])} leads</span>
         </div>`).join("")}
-      </div>
-      <div class="tv-rodape-tela">${pior ? `Onde mais perdemos: <b>${etapas[pior.i - 1]} → ${etapas[pior.i]}</b> · só ${pct(pior.t)} avançam. Atualize a situação do lead no Supremo a cada passo.` : "Atualize a situação do lead no Supremo a cada passo."}</div>`,
+      </div>`,
     });
   }
 
@@ -903,28 +895,25 @@ function telasTV(d) {
     const porCorretor = {};
     for (const a of alertas) porCorretor[a.corretor] = (porCorretor[a.corretor] || 0) + 1;
     const lista = Object.entries(porCorretor).map(([nome, n]) => ({ nome, n })).sort((a, b) => b.n - a.n).slice(0, 7);
-    const max = Math.max(1, ...lista.map((x) => x.n));
     const graves = alertas.filter((a) => a.diasParado > 30).length;
     telas.push({
-      id: "parados", nome: "Leads parados",
-      titulo: "Atenção: leads parados",
-      html: alertas.length ? `<div class="tv-split">
-          <div class="tv-esq alerta">
-            <div class="tv-big">${num(alertas.length)}</div>
-            <div class="tv-big-rot">leads sem nenhuma movimentação<br>há mais de 15 dias</div>
-            <div class="tv-big-sub"><b>${num(graves)}</b> deles há mais de 30 dias</div>
+      id: "parados", nome: "Leads parados", titulo: "Leads parados", sub: "Ativos, sem movimentação há mais de 15 dias",
+      rodape: "Lead com a situação atualizada no Supremo sai desta lista",
+      html: alertas.length ? `<div class="tvb-duo">
+          <div class="tvb-big">
+            <b>${num(alertas.length)}</b>
+            <p>leads sem nenhuma movimentação há mais de 15 dias</p>
+            <p class="tvb-big-sub"><b>${num(graves)}</b> deles há mais de 30 dias</p>
           </div>
-          <div class="tv-dir">
-            <div class="tv-dir-tit">Quem tem mais leads parados</div>
-            ${lista.map((x) => `<div class="tv-linha">
-              <span class="tv-ln-nome">${tvNome(x.nome)}</span>
-              <span class="tv-barra alerta"><i style="width:${(100 * x.n) / max}%"></i></span>
-              <span class="tv-ln-val">${num(x.n)}</span>
+          <div class="tvb-lista">
+            <div class="tvb-lista-tit">Quem tem mais leads parados</div>
+            ${lista.map((x) => `<div class="tvb-ln sem-pos">
+              <span class="tvb-ln-nome">${tvNome(x.nome)}</span>
+              <span class="tvb-ln-val">${num(x.n)}</span>
             </div>`).join("")}
           </div>
-        </div>
-        <div class="tv-rodape-tela">Lead com a situação atualizada no Supremo sai desta lista</div>`
-        : `<div class="tv-zerado"><b>0</b><span>Nenhum lead parado há mais de 15 dias. Parabéns, time!</span></div>`,
+        </div>`
+        : `<div class="tvb-zerado"><b>0</b><p>Nenhum lead parado há mais de 15 dias. Parabéns, time!</p></div>`,
     });
   }
   return telas;
@@ -946,20 +935,21 @@ function renderTV() {
   if (!telas.length) { tv.innerHTML = `<div class="tv-carregando"><p>Sem dados no período.</p></div>`; return; }
   estado.tvIdx = ((estado.tvIdx || 0) % telas.length + telas.length) % telas.length;
   const t = telas[estado.tvIdx];
-  const d = estado.data;
-  const hora = new Date(d.geradoEm).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  const hora = new Date(estado.data.geradoEm).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
   tv.dataset.tema = t.id;
-  const claro = t.id === "score" || t.id === "funil";
   tv.innerHTML = `<div class="tv-quadro">
-    <header class="tv-topo">
-      <img class="tv-logo" src="/logo-lion-${claro ? "preto" : "branco"}.png" alt="Lion Negócios Imobiliários" />
-      <h1 class="tv-titulo">${t.titulo}</h1>
-      <div class="tv-info"><span class="tv-vivo"><i></i>AO VIVO</span><span>atualizado às ${hora}</span></div>
+    <header class="tvb-topo">
+      <img class="tvb-logo" src="/logo-lion-preto.png" alt="Lion Negócios Imobiliários" />
+      <div class="tvb-tit"><h1>${t.titulo}</h1><span>${t.sub || ""}</span></div>
+      <div class="tvb-info"><span class="tvb-vivo"><i></i>ao vivo</span><span>atualizado às ${hora}</span></div>
     </header>
-    <section class="tv-tela" data-id="${t.id}">${t.html}</section>
-    <footer class="tv-navega">
-      ${telas.map((x, i) => `<button class="tv-ponto ${i === estado.tvIdx ? "ativo" : ""}" data-tv="${i}"><span>${x.nome}</span>${i === estado.tvIdx ? `<i style="animation-duration:${TV_SEG}s"></i>` : ""}</button>`).join("")}
-      <button class="tv-sair" id="tvSair" title="Abrir o painel completo">Painel completo →</button>
+    <section class="tvb-tela">${t.html}</section>
+    <footer class="tvb-rod">
+      <span class="tvb-rod-txt">${t.rodape || ""}</span>
+      <nav class="tvb-nav">
+        ${telas.map((x, i) => `<button class="tvb-nav-it ${i === estado.tvIdx ? "ativo" : ""}" data-tv="${i}"><i>${i === estado.tvIdx ? `<u style="animation-duration:${TV_SEG}s"></u>` : ""}</i>${x.nome}</button>`).join("")}
+        <button class="tvb-sair" id="tvSair">Painel completo →</button>
+      </nav>
     </footer>
   </div>`;
   tv.querySelectorAll("[data-tv]").forEach((b) => b.addEventListener("click", () => { estado.tvIdx = Number(b.dataset.tv); agendarTV(); renderTV(); }));

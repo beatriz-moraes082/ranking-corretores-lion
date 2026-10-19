@@ -8,3 +8,4 @@ node_modules/
 # gatilho de deploy do Render (privado)
 .deploy-hook
 previa-tv/
+public/_mock/
