@@ -9,7 +9,7 @@ const brlK = (n) => {
   return "R$ " + num(n);
 };
 
-let estado = { data: null, ord: "score", view: "ranking", refreshTimer: null, equipe: "", corretorSel: "", evolucao: null, evolucaoErro: null };
+let estado = { data: null, ord: "score", view: "ranking", refreshTimer: null, equipe: "", corretorSel: "", evolucao: null, evolucaoErro: null, evoJanela: "semana", paradosTodos: false };
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
 const chave = (s) => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
@@ -210,8 +210,9 @@ function renderRanking(d, perfis) {
   if (eq) {
     const cs = d.corretores.filter((x) => naEquipe(x.nome));
     const leads = cs.reduce((s, x) => s + x.leads, 0), vendas = cs.reduce((s, x) => s + x.vendas, 0), vgv = cs.reduce((s, x) => s + x.vgv, 0);
+    const propostas = cs.reduce((s, x) => s + (x.propostas || 0), 0);
     r = {
-      leads, vendas, vgv, ticketMedio: vendas ? Math.round(vgv / vendas) : 0,
+      leads, vendas, vgv, propostas, ticketMedio: vendas ? Math.round(vgv / vendas) : 0,
       corretoresAtivos: cs.filter((x) => x.leads > 0).length,
       conversaoGeral: leads ? +(100 * vendas / leads).toFixed(1) : 0,
       parados15d: alertas.length,
@@ -219,6 +220,7 @@ function renderRanking(d, perfis) {
   }
   const kpis = [
     { rot: "Leads no período", ico: "👥", cor: "var(--c3)", val: r.leads, sub: `${r.corretoresAtivos} corretores ativos` },
+    { rot: "Propostas", ico: "📝", cor: "var(--c2)", val: r.propostas ?? d.corretores.reduce((s, x) => s + (x.propostas || 0), 0), sub: "leads que chegaram em proposta" },
     { rot: "Vendas fechadas", ico: "🏆", cor: "var(--gold)", val: r.vendas, sub: `conversão ${r.conversaoGeral}%` },
     { rot: "VGV vendido", ico: "💰", cor: "var(--c4)", val: r.vgv, money: true, sub: `ticket ${brlK(r.ticketMedio)}` },
     { rot: "Parados +15 dias", ico: "🚨", cor: "var(--c5)", val: r.parados15d, sub: d.alertasProntos ? "precisam de ação" : "calculando…" },
@@ -504,22 +506,53 @@ function gargalo(f, ref) {
   return pior;
 }
 
-function funilCardHTML(titulo, sub, f, ref, refNome, etapas) {
-  const topo = Math.max(1, f[0]);
-  const linhas = etapas.map((nome, i) => {
-    const t = i ? taxa(f, i) : null, tr = i && ref ? taxa(ref, i) : null;
-    let cmp = "";
-    if (i && ref) {
-      const cls = t == null || tr == null ? "n" : t >= tr ? "g" : "r";
-      cmp = `<span class="fn-ref ${cls}">${refNome} ${pct(tr)}</span>`;
+const CURTO = ["Qualif.", "Agend./Créd.", "Visita", "Proposta", "Venda"];
+const pp = (v) => `${v > 0 ? "+" : ""}${v.toLocaleString("pt-BR", { maximumFractionDigits: Math.abs(v) < 10 ? 1 : 0 })} p.p.`;
+const avatar = (nome, i, cls = "rk-av") => `<span class="${cls}" style="background:linear-gradient(150deg,${corDe(i)},${corDe(i)}bb)">${iniciais(nome)}</span>`;
+
+// Funil em degraus: cada etapa é um bloco com o número grande; entre eles, a taxa de
+// passagem (e a da referência). Uma cor só (é uma sequência, não categorias).
+function funilFluxoHTML({ titulo, sub, av, f, ref, refNome, etapas }) {
+  const base = Math.max(1, f[0]);
+  const g = ref ? gargalo(f, ref) : null;
+  let partes = "";
+  etapas.forEach((nome, i) => {
+    if (i) {
+      const t = taxa(f, i), tr = ref ? taxa(ref, i) : null;
+      const fraco = f[i - 1] < MIN_GARGALO;
+      let cmp = "";
+      if (ref) {
+        const dir = t == null || tr == null ? "n" : t >= tr ? "g" : "r";
+        cmp = `<div class="fx-cmp ${fraco ? "n" : dir}">${dir === "g" && !fraco ? "▲" : dir === "r" && !fraco ? "▼" : "·"} ${refNome} ${pct(tr)}</div>`;
+      }
+      partes += `<div class="fx-link ${g && g.i === i ? "gargalo" : ""}">
+        <svg class="fx-seta" viewBox="0 0 40 12" aria-hidden="true"><path d="M0 6h34M29 1l6 5-6 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div class="fx-rate">${pct(t)}</div><small>${g && g.i === i ? "gargalo" : "passaram"}</small>${cmp}
+      </div>`;
     }
-    return `<div class="fn-row">
-      <div class="fn-nome">${nome}</div>
-      <div class="fn-bar"><i style="width:${Math.max(f[i] ? 2 : 0, (f[i] / topo) * 100)}%;--fc:${PALETA[i % PALETA.length]}"></i><b>${num(f[i])}</b></div>
-      <div class="fn-tx">${i ? `<span class="fn-pass">${pct(t)}</span><small>passaram</small>` : `<small>base do funil</small>`}${cmp}</div>
+    const share = (100 * f[i]) / base;
+    partes += `<div class="fx-stage" style="--a:${0.35 + 0.65 * (1 - i / (etapas.length - 1))}">
+      <div class="fx-lab">${nome}</div>
+      <div class="fx-num">${num(f[i])}</div>
+      <div class="fx-share">${i ? `${pct(share)} da base` : "base do funil"}</div>
+      <div class="fx-track"><i style="width:${f[i] ? Math.max(2, share) : 0}%"></i></div>
     </div>`;
-  }).join("");
-  return `<div class="card fn-card"><div class="fn-hd"><h3>${titulo}</h3><span>${sub}</span></div>${linhas}</div>`;
+  });
+
+  // leitura em uma frase
+  let insight = "";
+  if (ref && g) insight = `<b>Gargalo:</b> ${CURTO[g.i - 1]} → ${CURTO[g.i]}. Passam ${pct(taxa(f, g.i))}, contra ${pct(taxa(ref, g.i))} ${refNome === "imob." ? "na imobiliária" : "na equipe"} (${pp(g.delta)}).`;
+  else if (ref) insight = `Nenhuma passagem abaixo ${refNome === "imob." ? "da imobiliária" : "da equipe"} (considerando etapas com ${MIN_GARGALO}+ leads).`;
+  else {
+    let pior = null;
+    for (let i = 1; i < f.length; i++) { const t = taxa(f, i); if (t != null && f[i - 1] >= MIN_GARGALO && (!pior || t < pior.t)) pior = { i, t }; }
+    if (pior) insight = `<b>Onde mais se perde:</b> ${CURTO[pior.i - 1]} → ${CURTO[pior.i]}. Só ${pct(pior.t)} avançam.`;
+  }
+  return `<div class="card fx">
+    <div class="fx-hd">${av || ""}<div><h3>${titulo}</h3><span>${sub}</span></div></div>
+    <div class="fx-flow">${partes}</div>
+    ${insight ? `<div class="fx-insight">${insight}</div>` : ""}
+  </div>`;
 }
 
 function evolucaoHTML(ev, nomes, alvo) {
@@ -530,32 +563,38 @@ function evolucaoHTML(ev, nomes, alvo) {
     return { funil: somaFunil(js.map((j) => j.funil)), vendas: js.reduce((s, j) => s + j.vendas, 0) };
   };
   const fmtD = (iso) => iso.slice(8, 10) + "/" + iso.slice(5, 7);
-  const bloco = (titulo, kA, kB) => {
-    const a = doGrupo(kA), b = doGrupo(kB), ja = ev.janelas[kA], jb = ev.janelas[kB];
-    const met = [
-      ...ETAPAS_PADRAO.slice(0, 4).map((nome, i) => ({ nome: i ? nome : "Qualificados recebidos", a: a.funil[i], b: b.funil[i] })),
-      { nome: "Vendas fechadas", a: a.vendas, b: b.vendas },
-      { nome: "Qualificado → Proposta", a: a.funil[0] ? (100 * a.funil[3]) / a.funil[0] : null, b: b.funil[0] ? (100 * b.funil[3]) / b.funil[0] : null, taxa: true },
-    ];
-    const linhas = met.map((m) => {
-      let delta = "";
-      if (m.a != null && m.b != null) {
-        const dv = m.a - m.b;
-        const txt = m.taxa ? `${dv > 0 ? "+" : ""}${dv.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} p.p.`
-          : m.b ? `${dv > 0 ? "+" : ""}${Math.round((100 * dv) / m.b)}%` : dv ? `+${dv}` : "=";
-        delta = `<span class="pill ${dv > 0 ? "g" : dv < 0 ? "r" : "n"}">${dv > 0 ? "▲" : dv < 0 ? "▼" : ""} ${txt}</span>`;
-      }
-      const v = (x) => (m.taxa ? pct(x) : num(x));
-      return `<tr><td>${m.nome}</td><td class="cell-num">${v(m.a)}</td><td class="cell-num">${v(m.b)}</td><td>${delta}</td></tr>`;
-    }).join("");
-    return `<div><h3 class="evo-tit">${titulo}</h3><div class="tabela-wrap rolavel"><table>
-      <thead><tr><th>Métrica</th><th>${fmtD(ja.inicio)}–${fmtD(ja.fim)}</th><th>${fmtD(jb.inicio)}–${fmtD(jb.fim)}</th><th>Variação</th></tr></thead>
-      <tbody>${linhas}</tbody></table></div></div>`;
-  };
-  return `<div class="evo-grid">
-    ${bloco("Semana · últimos 7 dias × 7 dias antes", "semanaAtual", "semanaAnterior")}
-    ${bloco("Mês · mês atual × mesmo trecho do mês anterior", "mesAtual", "mesAnterior")}
-  </div><p class="nota">Evolução de ${esc(alvo)}. Etapas = leads recebidos em cada janela e até onde chegaram; vendas pela data da venda.</p>`;
+  const [kA, kB] = estado.evoJanela === "semana" ? ["semanaAtual", "semanaAnterior"] : ["mesAtual", "mesAnterior"];
+  const a = doGrupo(kA), b = doGrupo(kB), ja = ev.janelas[kA], jb = ev.janelas[kB];
+  const rotA = `${fmtD(ja.inicio)}–${fmtD(ja.fim)}`, rotB = `${fmtD(jb.inicio)}–${fmtD(jb.fim)}`;
+  const tq = (f) => (f[0] ? (100 * f[3]) / f[0] : null);
+  const met = [
+    { nome: "Qualificados recebidos", a: a.funil[0], b: b.funil[0] },
+    { nome: "Agendamento/Crédito", a: a.funil[1], b: b.funil[1] },
+    { nome: "Visitas", a: a.funil[2], b: b.funil[2] },
+    { nome: "Propostas", a: a.funil[3], b: b.funil[3] },
+    { nome: "Vendas fechadas", a: a.vendas, b: b.vendas },
+    { nome: "Qualificado → Proposta", a: tq(a.funil), b: tq(b.funil), taxa: true },
+  ];
+  const tiles = met.map((m) => {
+    const v = (x) => (m.taxa ? pct(x) : num(x));
+    let delta = `<span class="pill n">sem base</span>`;
+    if (m.a != null && m.b != null) {
+      const dv = m.a - m.b;
+      const txt = m.taxa ? pp(dv) : m.b ? `${dv > 0 ? "+" : ""}${Math.round((100 * dv) / m.b)}%` : dv ? `+${num(dv)}` : "igual";
+      delta = `<span class="pill ${dv > 0 ? "g" : dv < 0 ? "r" : "n"}">${dv > 0 ? "▲ " : dv < 0 ? "▼ " : ""}${txt}</span>`;
+    }
+    const max = Math.max(m.a || 0, m.b || 0) || 1;
+    return `<div class="evo-tile">
+      <div class="evo-rot">${m.nome}</div>
+      <div class="evo-val"><b>${v(m.a)}</b>${delta}</div>
+      <div class="evo-bars">
+        <div class="evo-bar atual"><span>${rotA}</span><i><u style="width:${((m.a || 0) / max) * 100}%"></u></i><em>${v(m.a)}</em></div>
+        <div class="evo-bar ant"><span>${rotB}</span><i><u style="width:${((m.b || 0) / max) * 100}%"></u></i><em>${v(m.b)}</em></div>
+      </div>
+    </div>`;
+  }).join("");
+  return `<div class="evo-tiles">${tiles}</div>
+    <p class="nota">Evolução de ${esc(alvo)}. Etapas = leads recebidos em cada janela e até onde chegaram; vendas pela data da venda.</p>`;
 }
 
 function renderFunil(d) {
@@ -563,11 +602,14 @@ function renderFunil(d) {
   c.innerHTML = "";
   const etapas = d.etapasFunil || ETAPAS_PADRAO;
   const grupo = nomeGrupo();
+  const eq = equipeAtual();
+  const refNome = eq ? "equipe" : "imob.";
   const corretores = d.corretores.filter((x) => naEquipe(x.nome) && x.funil && x.leads > 0);
   const fGrupo = somaFunil(corretores.map((x) => x.funil));
   const fImob = somaFunil(d.corretores.filter((x) => x.funil).map((x) => x.funil));
   if (estado.corretorSel && !corretores.some((x) => x.nome === estado.corretorSel)) estado.corretorSel = "";
   const sel = corretores.find((x) => x.nome === estado.corretorSel);
+  const idxCor = Object.fromEntries([...d.corretores].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")).map((x, i) => [x.nome, i]));
   const per = `${d.periodo.inicio.split("-").reverse().join("/")} a ${d.periodo.fim.split("-").reverse().join("/")}`;
 
   /* seletor de corretor */
@@ -575,54 +617,73 @@ function renderFunil(d) {
   top.className = "fn-top anim";
   top.innerHTML = `<label>Ver funil de
     <select id="corretorSel" class="sel">
-      <option value="">${esc(grupo === "Imobiliária" ? "Toda a imobiliária" : grupo)} (resultado geral)</option>
+      <option value="">${esc(eq ? eq.nome : "Toda a imobiliária")} (resultado geral)</option>
       ${[...corretores].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")).map((x) => `<option value="${esc(x.nome)}" ${x.nome === estado.corretorSel ? "selected" : ""}>${esc(x.nome.trim())}</option>`).join("")}
     </select></label>
+    ${sel ? `<button class="btn-link" id="voltarGrupo">← voltar para ${esc(eq ? eq.nome : "a imobiliária")}</button>` : ""}
     <span class="fn-per">leads recebidos de ${per}</span>`;
   top.querySelector("#corretorSel").addEventListener("change", (e) => { estado.corretorSel = e.target.value; render(); });
+  top.querySelector("#voltarGrupo")?.addEventListener("click", () => { estado.corretorSel = ""; render(); });
   c.appendChild(top);
 
-  /* funil (individual x equipe, ou equipe x imobiliária) */
+  /* funil em degraus */
   const secF = document.createElement("section");
-  secF.className = "fn-duo anim";
+  secF.className = "anim";
   secF.style.animationDelay = "60ms";
   if (sel) {
-    secF.innerHTML = funilCardHTML(esc(sel.nome.trim()), `${num(sel.funil[0])} qualificados recebidos`, sel.funil, fGrupo, grupo === "Imobiliária" ? "imob." : "equipe", etapas)
-      + funilCardHTML(esc(grupo === "Imobiliária" ? "Imobiliária" : grupo), `${corretores.length} corretores · referência`, fGrupo, null, "", etapas);
+    secF.innerHTML = funilFluxoHTML({
+      titulo: esc(sel.nome.trim()), av: avatar(sel.nome, idxCor[sel.nome] ?? 0),
+      sub: `${num(sel.funil[0])} qualificados recebidos · comparado com ${esc(eq ? eq.nome : "a imobiliária")}`,
+      f: sel.funil, ref: fGrupo, refNome, etapas,
+    });
   } else {
-    const eq = equipeAtual();
-    secF.innerHTML = funilCardHTML(esc(eq ? eq.nome : "Imobiliária"), `${corretores.length} corretores · ${num(fGrupo[0])} qualificados recebidos`, fGrupo, eq ? fImob : null, "imob.", etapas)
-      + (eq ? funilCardHTML("Imobiliária", "referência", fImob, null, "", etapas) : "");
-    secF.classList.toggle("solo", !eq);
+    secF.innerHTML = funilFluxoHTML({
+      titulo: esc(eq ? eq.nome : "Imobiliária"),
+      sub: `${corretores.length} corretores · ${num(fGrupo[0])} qualificados recebidos${eq ? " · comparado com a imobiliária" : ""}`,
+      f: fGrupo, ref: eq ? fImob : null, refNome: "imob.", etapas,
+    });
   }
   c.appendChild(secF);
 
-  /* comparativo da equipe */
+  /* comparativo */
+  const refTxt = eq ? "a equipe" : "a imobiliária";
   const sec2 = document.createElement("section");
   sec2.className = "secao anim";
   sec2.style.animationDelay = "120ms";
-  sec2.innerHTML = `<div class="secao-hd"><h2>Comparativo ${grupo === "Imobiliária" ? "dos corretores" : "da equipe"}</h2><span>taxa de passagem entre etapas · <b class="txt-red">vermelho</b> = gargalo (maior queda vs ${grupo === "Imobiliária" ? "a imobiliária" : "a equipe"}) · clique num corretor pra abrir o funil dele</span></div>`;
-  const CURTO = ["Qualif.", "Agend./Créd.", "Visita", "Proposta", "Venda"];
-  const passagens = CURTO.slice(1).map((e, i) => `${CURTO[i]} → ${e}`);
-  const linhaRef = `<tr class="fn-ref-row"><td><b>${esc(grupo)}</b></td><td class="cell-num">${num(fGrupo[0])}</td>${passagens.map((_, i) => `<td class="cell-num">${pct(taxa(fGrupo, i + 1))}</td>`).join("")}<td class="cell-num">${pct(fGrupo[0] ? (100 * fGrupo[4]) / fGrupo[0] : null)}</td><td></td></tr>`;
+  sec2.innerHTML = `<div class="secao-hd"><h2>Comparativo ${eq ? "da equipe" : "dos corretores"}</h2><span>taxa de passagem entre etapas · clique num corretor pra abrir o funil dele</span></div>
+    <div class="legenda">
+      <span><i class="lg-g">▲</i> acima de ${refTxt}</span>
+      <span><i class="lg-r">▼</i> abaixo de ${refTxt}</span>
+      <span><i class="lg-garg"></i> gargalo: maior queda vs ${refTxt}</span>
+      <span><i class="lg-fraco"></i> menos de ${MIN_GARGALO} leads na etapa anterior</span>
+    </div>`;
+  const maxQ = Math.max(1, ...corretores.map((x) => x.funil[0]));
+  const celula = (f, i, ref, garg) => {
+    const t = taxa(f, i), tr = ref ? taxa(ref, i) : null, fraco = f[i - 1] < MIN_GARGALO;
+    let d = "";
+    if (t != null && tr != null && !fraco) {
+      const dv = t - tr;
+      d = `<small class="${dv >= 0 ? "g" : "r"}">${dv >= 0 ? "▲" : "▼"} ${pp(Math.abs(dv)).replace("+", "")}</small>`;
+    }
+    return `<td class="cx ${garg ? "gargalo" : fraco ? "fraco" : ""}" title="${num(f[i])} de ${num(f[i - 1])}"><b>${pct(t)}</b>${d}</td>`;
+  };
+  const linhaRef = `<tr class="fn-ref-row"><td><div class="rk"><span class="rk-av ref">∑</span><span><span class="rk-nome">${esc(grupo)}</span><br><span class="rk-sub">referência</span></span></div></td>
+    <td class="cx"><b>${num(fGrupo[0])}</b></td>${CURTO.slice(1).map((_, i) => `<td class="cx"><b>${pct(taxa(fGrupo, i + 1))}</b></td>`).join("")}
+    <td class="cx"><b>${pct(fGrupo[0] ? (100 * fGrupo[4]) / fGrupo[0] : null)}</b></td><td></td></tr>`;
   const linhas = [...corretores].sort((a, b) => b.funil[0] - a.funil[0]).map((x) => {
     const g = gargalo(x.funil, fGrupo);
     return `<tr class="clicavel ${x.nome === estado.corretorSel ? "sel" : ""}" data-nome="${esc(x.nome)}">
-      <td><span class="rk-nome">${esc(x.nome.trim())}</span></td>
-      <td class="cell-num">${num(x.funil[0])}</td>
-      ${passagens.map((_, i) => {
-        const t = taxa(x.funil, i + 1);
-        const cls = g && g.i === i + 1 ? "gargalo" : x.funil[i] < MIN_GARGALO ? "fraco" : "";
-        return `<td class="cell-num ${cls}" title="${num(x.funil[i + 1])} de ${num(x.funil[i])}">${pct(t)}</td>`;
-      }).join("")}
-      <td class="cell-num">${pct(x.funil[0] ? (100 * x.funil[4]) / x.funil[0] : null)}</td>
-      <td>${g ? `<span class="pill r">→ ${CURTO[g.i]} ${Math.round(g.delta)} p.p.</span>` : `<span class="pill n">—</span>`}</td>
+      <td><div class="rk">${avatar(x.nome, idxCor[x.nome] ?? 0)}<span class="rk-nome">${esc(x.nome.trim())}</span></div></td>
+      <td class="cx"><b>${num(x.funil[0])}</b><span class="mini-bar"><i style="width:${(x.funil[0] / maxQ) * 100}%"></i></span></td>
+      ${CURTO.slice(1).map((_, i) => celula(x.funil, i + 1, fGrupo, g && g.i === i + 1)).join("")}
+      <td class="cx"><b>${pct(x.funil[0] ? (100 * x.funil[4]) / x.funil[0] : null)}</b></td>
+      <td>${g ? `<span class="tag-garg">${CURTO[g.i - 1]} → ${CURTO[g.i]}</span>` : `<span class="pill n">—</span>`}</td>
     </tr>`;
   }).join("");
   const wrap = document.createElement("div");
   wrap.className = "tabela-wrap rolavel";
-  wrap.innerHTML = `<table class="fn-tab"><thead><tr><th>Corretor</th><th>Qualif.</th>${passagens.map((p) => `<th>${p}</th>`).join("")}<th>Qualif. → Venda</th><th>Gargalo</th></tr></thead>
-    <tbody>${linhaRef}${linhas || `<tr><td colspan="${passagens.length + 4}" class="vazio">Sem leads no período.</td></tr>`}</tbody></table>`;
+  wrap.innerHTML = `<table class="fn-tab"><thead><tr><th>Corretor</th><th>Qualificados</th>${CURTO.slice(1).map((e, i) => `<th>${CURTO[i]} <span>→</span><br>${e}</th>`).join("")}<th>Qualif. <span>→</span><br>Venda</th><th>Gargalo</th></tr></thead>
+    <tbody>${linhaRef}${linhas || `<tr><td colspan="8" class="vazio">Sem leads no período.</td></tr>`}</tbody></table>`;
   wrap.querySelectorAll("tr[data-nome]").forEach((tr) => tr.addEventListener("click", () => {
     estado.corretorSel = tr.dataset.nome;
     render();
@@ -639,28 +700,43 @@ function renderFunil(d) {
   sec3.className = "secao anim";
   sec3.style.animationDelay = "160ms";
   sec3.innerHTML = `<div class="secao-hd"><h2>🚨 Leads parados${sel ? ` de ${esc(sel.nome.trim())}` : ""}</h2><span>ativos, sem movimentação há +15 dias · capturados nos últimos ${d.alertaJanelaDias || 45} dias</span></div>`;
-  const box = document.createElement("div");
-  box.className = "alertas-box";
-  if (!d.alertasProntos) box.innerHTML = `<div class="vazio">⏳ Calculando varredura… recarrega em instantes.</div>`;
-  else if (!parados.length) box.innerHTML = `<div class="vazio">🎉 Nenhum lead parado além de 15 dias.</div>`;
-  else box.innerHTML = parados.map((a) => `
-    <div class="alerta-row">
-      <div class="alerta-dias"><b>${a.diasParado}</b><span>dias</span></div>
-      <div class="alerta-info">
-        <div class="l">${esc(a.lead)} ${a.telefone ? `<span class="alerta-tel">· ${esc(a.telefone)}</span>` : ""}</div>
-        <div class="m">${sel ? "" : `<span class="tag-corr">${esc(a.corretor.trim())}</span> · `}etapa atual: <b>${esc(a.etapaFunil || "Qualificado")}</b>${a.situacao ? ` · situação ${esc(a.situacao.trim())}` : ""}</div>
+  if (!d.alertasProntos) sec3.innerHTML += `<div class="alertas-box"><div class="vazio">⏳ Calculando varredura… recarrega em instantes.</div></div>`;
+  else if (!parados.length) sec3.innerHTML += `<div class="alertas-box"><div class="vazio">🎉 Nenhum lead parado além de 15 dias.</div></div>`;
+  else {
+    const porEtapa = etapas.map((e) => ({ e, n: parados.filter((a) => (a.etapaFunil || "Qualificado") === e).length })).filter((x) => x.n);
+    const graves = parados.filter((a) => a.diasParado > 30).length;
+    const LIM = 24;
+    const lista = estado.paradosTodos ? parados : parados.slice(0, LIM);
+    sec3.innerHTML += `<div class="parados-resumo">
+        <div class="pr-total"><b>${num(parados.length)}</b><span>leads parados</span></div>
+        <div class="pr-graves"><b>${num(graves)}</b><span>há mais de 30 dias</span></div>
+        <div class="pr-etapas">${porEtapa.map((x) => `<span class="pr-chip">${x.e} <b>${num(x.n)}</b></span>`).join("")}</div>
       </div>
-    </div>`).join("");
-  sec3.appendChild(box);
+      <div class="parados-grid">${lista.map((a) => `
+        <div class="parado ${a.diasParado > 30 ? "grave" : ""}">
+          <div class="alerta-dias"><b>${a.diasParado}</b><span>dias</span></div>
+          <div class="alerta-info">
+            <div class="l">${esc(a.lead)} ${a.telefone ? `<span class="alerta-tel">· ${esc(a.telefone)}</span>` : ""}</div>
+            <div class="m"><span class="pr-chip sm">${esc(a.etapaFunil || "Qualificado")}</span>${sel ? "" : ` <span class="tag-corr">${esc(a.corretor.trim())}</span>`}${a.situacao ? ` <span class="sit">${esc(a.situacao.trim())}</span>` : ""}</div>
+          </div>
+        </div>`).join("")}</div>
+      ${parados.length > LIM ? `<button class="btn-mais" id="paradosMais">${estado.paradosTodos ? "Mostrar menos" : `Mostrar todos (${num(parados.length)})`}</button>` : ""}`;
+    sec3.querySelector("#paradosMais")?.addEventListener("click", () => { estado.paradosTodos = !estado.paradosTodos; render(); });
+  }
   c.appendChild(sec3);
 
   /* evolução */
   const sec4 = document.createElement("section");
   sec4.className = "secao anim";
   sec4.style.animationDelay = "200ms";
-  sec4.innerHTML = `<div class="secao-hd"><h2>Evolução</h2><span>comparação com a semana e o mês anteriores · não depende do filtro de período</span></div>`;
+  sec4.innerHTML = `<div class="secao-hd evo-hd"><h2>Evolução</h2><span>${estado.evoJanela === "semana" ? "últimos 7 dias × os 7 dias antes" : "mês atual × mesmo trecho do mês anterior"} · não depende do filtro de período</span>
+    <div class="chips mini" id="evoJanela"><button class="chip ${estado.evoJanela === "semana" ? "ativo" : ""}" data-j="semana">Semana</button><button class="chip ${estado.evoJanela !== "semana" ? "ativo" : ""}" data-j="mes">Mês</button></div></div>`;
+  sec4.querySelector("#evoJanela").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-j]"); if (!b) return;
+    estado.evoJanela = b.dataset.j; render();
+  });
   const evBox = document.createElement("div");
-  evBox.innerHTML = evolucaoHTML(estado.evolucao, alvoNomes, sel ? sel.nome.trim() : grupo === "Imobiliária" ? "toda a imobiliária" : grupo);
+  evBox.innerHTML = evolucaoHTML(estado.evolucao, alvoNomes, sel ? sel.nome.trim() : eq ? eq.nome : "toda a imobiliária");
   sec4.appendChild(evBox);
   c.appendChild(sec4);
 }
