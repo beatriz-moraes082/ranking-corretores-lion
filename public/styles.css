@@ -461,6 +461,8 @@ body.modo-tv > :not(#tv):not(script) { display: none !important; }
 .tvb-tit span { display: block; margin-top: calc(var(--u) * 0.3); font-size: calc(var(--u) * 1.15); color: var(--dim); }
 .tvb-info { display: flex; flex-direction: column; align-items: flex-end; gap: calc(var(--u) * 0.2); font-size: calc(var(--u) * 1.05); color: var(--dim); }
 .tvb-vivo { display: inline-flex; align-items: center; gap: calc(var(--u) * 0.5); color: var(--tx); }
+.tvb-vivo.off { color: var(--dim); }
+.tvb-vivo.off i { background: var(--dim); animation: none; }
 .tvb-vivo i { width: calc(var(--u) * 0.5); height: calc(var(--u) * 0.5); border-radius: 50%; background: var(--ac); animation: tvbPulso 2.4s ease-out infinite; }
 @keyframes tvbPulso { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ac) 45%, transparent); } 70% { box-shadow: 0 0 0 calc(var(--u) * 0.6) transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
 

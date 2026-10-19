@@ -134,6 +134,21 @@ variável `ALERTA_DIAS` no `.env`.
 | `CACHE_TTL_MIN` | `15` | Minutos de cache dos dados do período. |
 | `ALERTA_DIAS` | `45` | Janela (dias) da varredura de leads parados. |
 | `EQUIPES_JSON` | — | Opcional. Equipes em JSON (substitui o `equipes.json`). |
+| `KV_URL` | — | Recomendado no Render. URL do Key Value (Redis) onde o cache sobrevive às publicações. |
+
+### Cache persistente (Render Key Value)
+
+No plano gratuito do Render o disco do serviço é apagado a cada publicação. Sem um
+armazém fora dele, toda publicação faz o servidor buscar tudo de novo no Supremo, e o
+Supremo bloqueia temporariamente quando recebe consultas demais (HTTP 429).
+
+1. No Render: **New → Key Value**, plano **Free**, mesma região do serviço (Oregon).
+2. Copie a **Internal Key Value URL** (começa com `redis://`).
+3. No serviço `elite-lion` → **Environment** → adicione `KV_URL` com essa URL → **Save**.
+
+Com isso o servidor sobe já com os dados e só consulta o Supremo o que estiver vencido.
+Além disso, o navegador da TV guarda os últimos dados: se o servidor ou o Supremo
+ficarem fora, a TV continua mostrando o último ranking com "reconectando…".
 
 ---
 

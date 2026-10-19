@@ -19,3 +19,18 @@ services:
         value: "15"
       - key: ALERTA_DIAS
         value: "45"
+      # Cache persistente: sem ele, toda publicação busca tudo de novo no Supremo
+      # (que bloqueia quando são consultas demais). Aponta para o Key Value abaixo.
+      - key: KV_URL
+        fromService:
+          type: keyvalue
+          name: elite-lion-cache
+          property: connectionString
+
+  # Key Value gratuito do Render: guarda o cache do painel entre publicações.
+  - type: keyvalue
+    name: elite-lion-cache
+    plan: free
+    region: oregon
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: [] # só acessível pelos serviços do Render

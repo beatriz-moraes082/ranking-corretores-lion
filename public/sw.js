@@ -1,7 +1,7 @@
 // Service worker do Elite Lion: permite instalar o painel como app no celular.
 // Os dados (/api) vêm sempre da rede. O resto tenta a rede primeiro e só usa a
 // cópia guardada quando está sem internet, pra nunca mostrar versão velha.
-const CACHE = "elite-lion-v1";
+const CACHE = "elite-lion-v2";
 const SHELL = ["/", "/index.html", "/styles.css", "/app.js", "/logo-lion-preto.png", "/logo-lion-branco.png", "/icons/icon-192.png"];
 
 self.addEventListener("install", (e) => {
@@ -19,12 +19,14 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET" || url.origin !== location.origin || url.pathname.startsWith("/api/")) return;
+  const guardado = () => caches.match(e.request).then((r) => r || caches.match("/index.html"));
   e.respondWith(
     fetch(e.request)
       .then((r) => {
-        if (r.ok) { const copia = r.clone(); caches.open(CACHE).then((c) => c.put(e.request, copia)); }
-        return r;
+        if (r.ok) { const copia = r.clone(); caches.open(CACHE).then((c) => c.put(e.request, copia)); return r; }
+        // servidor reiniciando (502/503 do Render): usa a cópia guardada se houver
+        return r.status >= 500 ? guardado().then((g) => g || r) : r;
       })
-      .catch(() => caches.match(e.request).then((r) => r || caches.match("/index.html")))
+      .catch(guardado)
   );
 });

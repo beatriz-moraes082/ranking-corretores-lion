@@ -145,19 +145,46 @@ function radarSVG(dims, cor) {
 }
 
 /* ---------- carregar ---------- */
+// Últimos dados recebidos ficam guardados no navegador (da TV, do celular...). Se o
+// servidor reiniciar ou o Supremo bloquear as consultas, a tela continua mostrando
+// esses dados em vez de ficar em "Carregando…".
+const CACHE_LOCAL = "elite-lion-ultimo";
+function chaveDados(inicio, fim) { return `${inicio}|${fim}`; }
+function lerLocal(nome) { try { return JSON.parse(localStorage.getItem(`${CACHE_LOCAL}-${nome}`) || "null"); } catch { return null; } }
+function salvarLocal(nome, valor) { try { localStorage.setItem(`${CACHE_LOCAL}-${nome}`, JSON.stringify(valor)); } catch {} }
+let retentativa = null;
+
 async function carregar({ soft = false } = {}) {
   const { inicio, fim } = periodoAtual();
   if (!inicio || !fim) return;
-  if (!soft) $("#conteudo").innerHTML = `<div class="carregando"><div class="loader"></div><p>Consultando o Supremo CRM…<br><small>Períodos longos podem levar ~1 min na 1ª vez.</small></p></div>`;
+  const chave = chaveDados(inicio, fim);
+  // mostra na hora o que ficou guardado deste período (se houver)
+  if (!estado.data || estado.dataChave !== chave) {
+    const guardado = lerLocal("ranking");
+    if (guardado?.chave === chave && guardado.data) {
+      estado.data = guardado.data; estado.dataChave = chave; estado.semConexao = false;
+      render();
+    } else if (!soft) {
+      estado.data = null;
+      $("#conteudo").innerHTML = `<div class="carregando"><div class="loader"></div><p>Consultando o Supremo CRM…<br><small>Períodos longos podem levar ~1 min na 1ª vez.</small></p></div>`;
+      if (estado.view === "tv") renderTV();
+    }
+  }
   try {
-    const r = await fetch(`/api/ranking?inicio=${inicio}&fim=${fim}`);
+    const r = await fetch(`/api/ranking?inicio=${inicio}&fim=${fim}`, { signal: AbortSignal.timeout(90000) });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detalhe || data.erro || "Falha");
-    estado.data = data;
+    estado.data = data; estado.dataChave = chave; estado.semConexao = false;
+    salvarLocal("ranking", { chave, data });
+    clearTimeout(retentativa);
     render();
     $("#rodapeInfo").textContent = `Período ${data.periodo.inicio} a ${data.periodo.fim} · atualizado ${new Date(data.geradoEm).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
   } catch (e) {
-    if (!soft) $("#conteudo").innerHTML = `<div class="erro"><b>Não consegui carregar.</b><br>${e.message}</div>`;
+    // sem conexão: mantém os últimos dados na tela e tenta de novo em 1 minuto
+    clearTimeout(retentativa);
+    retentativa = setTimeout(() => carregar({ soft: true }), 60_000);
+    if (estado.data) { estado.semConexao = true; render(); return; }
+    if (!soft) $("#conteudo").innerHTML = `<div class="erro"><b>Não consegui carregar.</b><br>${esc(e.message)}<br><small>Tentando de novo em 1 minuto.</small></div>`;
   }
 }
 
@@ -754,8 +781,12 @@ async function carregarEvolucao() {
     for (const [nome, v] of Object.entries(ev.corretores || {})) ev.porChave[chave(nome)] = v;
     estado.evolucao = ev;
     estado.evolucaoErro = null;
+    salvarLocal("evolucao", ev);
   } catch (e) {
-    estado.evolucaoErro = e.message;
+    if (!estado.evolucao) {
+      const guardada = lerLocal("evolucao");
+      if (guardada) estado.evolucao = guardada; else estado.evolucaoErro = e.message;
+    }
   }
   if (estado.data && estado.view === "funil") render();
 }
@@ -936,13 +967,15 @@ function renderTV() {
   if (!telas.length) { tv.innerHTML = `<div class="tv-carregando"><p>Sem dados no período.</p></div>`; return; }
   estado.tvIdx = ((estado.tvIdx || 0) % telas.length + telas.length) % telas.length;
   const t = telas[estado.tvIdx];
-  const hora = new Date(estado.data.geradoEm).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  const gerado = new Date(estado.data.geradoEm);
+  const hoje = gerado.toDateString() === new Date().toDateString();
+  const hora = (hoje ? "" : gerado.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) + " ") + gerado.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
   tv.dataset.tema = t.id;
   tv.innerHTML = `<div class="tv-quadro">
     <header class="tvb-topo">
       <img class="tvb-logo" src="/logo-lion-preto.png" alt="Lion Negócios Imobiliários" />
       <div class="tvb-tit"><h1>${t.titulo}</h1><span>${t.sub || ""}</span></div>
-      <div class="tvb-info"><span class="tvb-vivo"><i></i>ao vivo</span><span>atualizado às ${hora}</span></div>
+      <div class="tvb-info">${estado.semConexao ? `<span class="tvb-vivo off"><i></i>reconectando…</span>` : `<span class="tvb-vivo"><i></i>ao vivo</span>`}<span>atualizado ${hoje ? "às " : "em "}${hora}</span></div>
     </header>
     <section class="tvb-tela">${t.html}</section>
     <footer class="tvb-rod">

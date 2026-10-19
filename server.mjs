@@ -11,6 +11,7 @@ import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fetchLeadsPorPeriodo, fetchVendidos } from "./src/supremo.mjs";
 import { agregar, escanearParados, agregarEvolucao } from "./src/aggregate.mjs";
+import { criarArmazem } from "./src/armazem.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
@@ -55,24 +56,61 @@ let evolucaoCache = null; // { ts, data }
 let evolucaoEmVoo = null;
 const emVoo = new Map(); // key -> Promise (dedupe de buscas simultaneas)
 
+// Disco local + (opcional) Render Key Value em KV_URL. O disco do plano gratuito
+// do Render some a cada publicação; o Key Value não, então com ele o servidor
+// reinicia já com os dados e só busca no Supremo o que estiver vencido.
+const armazem = criarArmazem(process.env.KV_URL);
+const KV_CHAVE = "elite-lion:cache:v2";
+const MAX_PERIODOS = 12; // períodos personalizados antigos saem do cache
+let kvAgendado = null;
+
+function montarCache() {
+  const periodos = [...cache.entries()].sort((a, b) => b[1].ts - a[1].ts).slice(0, MAX_PERIODOS);
+  return { vendidos: vendidosCache, alertas: alertasCache, evolucao: evolucaoCache, periodos: Object.fromEntries(periodos) };
+}
+function aplicarCache(obj, origem) {
+  if (!obj) return;
+  const maisNovo = (a, b) => (!a ? b : !b ? a : (b.ts || 0) > (a.ts || 0) ? b : a);
+  vendidosCache = maisNovo(vendidosCache, obj.vendidos);
+  alertasCache = maisNovo(alertasCache, obj.alertas);
+  evolucaoCache = maisNovo(evolucaoCache, obj.evolucao);
+  for (const [k, v] of Object.entries(obj.periodos || {})) {
+    if (!cache.has(k) || (v.ts || 0) > cache.get(k).ts) cache.set(k, v);
+  }
+  console.log(`  cache carregado do ${origem} (${cache.size} periodos)`);
+}
 async function persistir() {
+  const obj = montarCache();
   try {
     await mkdir(CACHE_DIR, { recursive: true });
-    const obj = { vendidos: vendidosCache, alertas: alertasCache, evolucao: evolucaoCache, periodos: Object.fromEntries(cache) };
     await writeFile(CACHE_FILE, JSON.stringify(obj));
   } catch {}
+  // Key Value: no máximo uma gravação a cada 20s (o cache tem ~1 MB)
+  if (armazem && !kvAgendado) {
+    kvAgendado = setTimeout(() => {
+      kvAgendado = null;
+      armazem.set(KV_CHAVE, JSON.stringify(montarCache())).catch((e) => console.error("  [kv] falha ao gravar:", e.message));
+    }, 20_000);
+  }
 }
 function carregarCacheDisco() {
   try {
     if (!existsSync(CACHE_FILE)) return;
-    const obj = JSON.parse(readFileSync(CACHE_FILE, "utf8"));
-    vendidosCache = obj.vendidos || null;
-    alertasCache = obj.alertas || null;
-    evolucaoCache = obj.evolucao || null;
-    for (const [k, v] of Object.entries(obj.periodos || {})) cache.set(k, v);
-    console.log(`  cache em disco carregado (${cache.size} periodos)`);
+    aplicarCache(JSON.parse(readFileSync(CACHE_FILE, "utf8")), "disco");
   } catch {}
 }
+async function carregarCacheKV() {
+  if (!armazem) return;
+  try {
+    const bruto = await armazem.get(KV_CHAVE);
+    if (bruto) aplicarCache(JSON.parse(bruto), "Key Value");
+    else console.log("  [kv] vazio (primeira vez)");
+  } catch (e) {
+    console.error("  [kv] falha ao ler:", e.message);
+  }
+}
+// o cache deste periodo ainda esta dentro do prazo?
+const fresco = (entrada, ttl) => !!entrada && Date.now() - entrada.ts < ttl;
 
 async function getVendidos() {
   if (vendidosCache && Date.now() - vendidosCache.ts < CACHE_TTL * 4) return vendidosCache.rows;
@@ -290,6 +328,7 @@ server.listen(PORT, () => {
   console.log(`  Painel rodando em: http://localhost:${PORT}`);
 
   carregarCacheDisco();
+  console.log(armazem ? "  armazém persistente: Render Key Value (KV_URL)" : "  armazém persistente: não configurado (defina KV_URL)");
 
   // Pre-aquece o mes atual (sem bloquear) e revalida periodicamente, para que
   // quem abrir o painel pegue sempre o cache quente.
@@ -301,10 +340,16 @@ server.listen(PORT, () => {
   };
   // Ordem na subida: 1) ranking do mes (o que a TV mostra primeiro), 2) varredura
   // de parados, 3) evolucao. Tudo em sequencia para nao estourar o limite do Supremo.
+  // Só busca no Supremo o que estiver vencido: depois de uma publicação, com o
+  // Key Value configurado, quase nada precisa ser buscado de novo.
   setTimeout(async () => {
-    await aquecer();
+    await carregarCacheKV();
+    const { inicio, fim } = periodoMesAtual();
+    if (!fresco(cache.get(`${inicio}|${fim}`), CACHE_TTL)) await aquecer();
+    else console.log("  [cache] mes atual ainda fresco, sem nova busca");
     await getAlertas().catch((e) => console.error("  [cache] falha nos parados:", e.message));
-    await buscarEvolucao().catch((e) => console.error("  [cache] falha na evolucao:", e.message));
+    const evoOk = fresco(evolucaoCache, CACHE_TTL * 2) && evolucaoCache.data?.janelas?.mesAtual?.fim === janelasEvolucao().mesAtual.fim;
+    if (!evoOk) await buscarEvolucao().catch((e) => console.error("  [cache] falha na evolucao:", e.message));
   }, 500);
   setInterval(aquecer, CACHE_TTL);
   setInterval(() => buscarEvolucao().catch(() => {}), CACHE_TTL * 2);
