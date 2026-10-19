@@ -948,9 +948,11 @@ function renderTV() {
   const t = telas[estado.tvIdx];
   const d = estado.data;
   const hora = new Date(d.geradoEm).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  tv.dataset.tema = t.id;
+  const claro = t.id === "score" || t.id === "funil";
   tv.innerHTML = `<div class="tv-quadro">
     <header class="tv-topo">
-      <img class="tv-logo" src="/logo-lion-branco.png" alt="Lion Negócios Imobiliários" />
+      <img class="tv-logo" src="/logo-lion-${claro ? "preto" : "branco"}.png" alt="Lion Negócios Imobiliários" />
       <h1 class="tv-titulo">${t.titulo}</h1>
       <div class="tv-info"><span class="tv-vivo"><i></i>AO VIVO</span><span>atualizado às ${hora}</span></div>
     </header>
