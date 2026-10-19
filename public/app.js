@@ -534,7 +534,7 @@ function funilFluxoHTML({ titulo, sub, av, f, ref, refNome, etapas }) {
     }
     const share = (100 * f[i]) / base;
     partes += `<div class="fx-stage" style="--a:${0.35 + 0.65 * (1 - i / (etapas.length - 1))}">
-      <div class="fx-lab">${nome}</div>
+      <div class="fx-lab">${nome.replace("/", "/<wbr>")}</div>
       <div class="fx-num">${num(f[i])}</div>
       <div class="fx-share">${i ? `${pct(share)} da base` : "base do funil"}</div>
       <div class="fx-track"><i style="width:${f[i] ? Math.max(2, share) : 0}%"></i></div>
