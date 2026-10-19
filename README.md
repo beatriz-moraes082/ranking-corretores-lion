@@ -31,6 +31,12 @@ poucos minutos você recebe um link fixo (ex.: `https://elite-lion.onrender.com`
   **a melhorar** — inspirado no perfil de SDRs.
 - **🚨 Leads parados +15 dias** — ativos sem movimentação há +15 dias, com nome,
   telefone e corretor responsável.
+- **Funil** — funil do corretor (Qualificado → Agendamento/Crédito → Visita → Proposta →
+  Venda) com a taxa de passagem entre etapas ao lado da taxa da equipe; tabela
+  comparativa com o **gargalo** de cada corretor (passagem com maior queda vs a equipe);
+  leads parados do corretor com a etapa atual; e **evolução** vs semana e mês anteriores.
+- **Equipes** — seletor de equipe no topo. O link fica com `?equipe=<id>`, então cada
+  gerente salva o link da própria equipe e vê o resultado geral dela.
 
 **Filtro de período:** Semana · Mês atual · Personalizado. **Auto-refresh** a cada 3 min
 (modo TV) e alternância de **tema claro/escuro** (botão no topo, padrão escuro).
@@ -38,8 +44,30 @@ poucos minutos você recebe um link fixo (ex.: `https://elite-lion.onrender.com`
 ### Score de Performance
 
 Índice de 0 a 100 que combina, normalizado entre os corretores do período:
-vendas (28%), conversão (20%), volume (16%), 1º contato (16%), movimentação (10%) e
-consistência (10%). É o que ordena o pódio e o ranking por padrão.
+vendas (30%), propostas (25%), conversão (20%), 1º contato (15%) e consistência (10%).
+É o que ordena o pódio e o ranking por padrão. Volume e movimentação ficam só no perfil
+comportamental: o pré-atendimento é da recepção e o corretor já recebe o lead qualificado.
+
+### Funil
+
+Começa em **Qualificado** (todo lead que chegou ao corretor). As etapas seguintes vêm da
+*situação* atual do lead no Supremo: Agendamento ou Análise de crédito → Agendamento/Crédito,
+Visita, Proposta, e Venda (lead vendido). **Etapa pulada conta como passada**: um lead em
+Visita conta também em Agendamento/Crédito. A API só dá a situação atual (sem histórico).
+
+### Equipes
+
+A API do Supremo não tem equipe nem gerente, então elas ficam em `equipes.json`
+(ou na variável `EQUIPES_JSON`, que tem prioridade):
+
+```json
+[
+  { "id": "equipe-ana", "nome": "Equipe Ana", "gerente": "Ana", "corretores": ["Nome do corretor", "..."] }
+]
+```
+
+Os nomes são comparados sem acento e sem diferenciar maiúsculas. Com a lista vazia, o
+seletor some e o painel mostra a imobiliária toda.
 
 > **1º contato** = tempo entre a captura do lead e a qualificação (quando o time faz o
 > primeiro contato). Quanto menor, mais rápido o lead é atendido.
@@ -70,7 +98,7 @@ npm start
 ## Como funciona por dentro
 
 - `server.mjs` — servidor HTTP (Node nativo). Guarda o token, expõe `/api/ranking` e
-  serve o painel. Tem cache em memória e em disco.
+  `/api/evolucao` (semana e mês x anteriores) e serve o painel. Tem cache em memória e em disco.
 - `src/supremo.mjs` — cliente da API do Supremo (paginação, retry e controle de ritmo).
 - `src/aggregate.mjs` — transforma os leads brutos nas métricas do ranking.
 - `public/` — o painel (HTML, CSS e JS sem frameworks).
@@ -104,6 +132,7 @@ variável `ALERTA_DIAS` no `.env`.
 | `PORT` | `8787` | Porta do servidor. |
 | `CACHE_TTL_MIN` | `15` | Minutos de cache dos dados do período. |
 | `ALERTA_DIAS` | `45` | Janela (dias) da varredura de leads parados. |
+| `EQUIPES_JSON` | — | Opcional. Equipes em JSON (substitui o `equipes.json`). |
 
 ---
 

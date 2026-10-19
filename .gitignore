@@ -4,3 +4,6 @@ node_modules/
 *.log
 .DS_Store
 .cache/
+
+# gatilho de deploy do Render (privado)
+.deploy-hook

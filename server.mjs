@@ -10,9 +10,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fetchLeadsPorPeriodo, fetchVendidos } from "./src/supremo.mjs";
-import { agregar, escanearParados } from "./src/aggregate.mjs";
+import { agregar, escanearParados, agregarEvolucao } from "./src/aggregate.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
+
+// Datas do Supremo vem no horario local (Maceio, UTC-3). Sem isso, no Render (UTC)
+// o "hoje" vira o dia seguinte depois das 21h.
+process.env.TZ ||= "America/Maceio";
 
 // --- .env simples (opcional) ---
 function loadEnv() {
@@ -42,17 +46,19 @@ if (!TOKEN || TOKEN.includes("cole_seu_token")) {
 // (~57 paginas) leva ~1 min. Servimos sempre o cache (mesmo vencido) na hora e
 // revalidamos em segundo plano; quem abre o painel quase nunca espera.
 const CACHE_DIR = join(__dirname, ".cache");
-const CACHE_FILE = join(CACHE_DIR, "ranking.json");
+const CACHE_FILE = join(CACHE_DIR, "ranking-v2.json"); // v2: payload com funil por corretor
 const cache = new Map(); // key -> { ts, data }
 let vendidosCache = null; // { ts, rows }
 let alertasCache = null; // { ts, alertas, porCorretor }
 let alertasEmVoo = null;
+let evolucaoCache = null; // { ts, data }
+let evolucaoEmVoo = null;
 const emVoo = new Map(); // key -> Promise (dedupe de buscas simultaneas)
 
 async function persistir() {
   try {
     await mkdir(CACHE_DIR, { recursive: true });
-    const obj = { vendidos: vendidosCache, alertas: alertasCache, periodos: Object.fromEntries(cache) };
+    const obj = { vendidos: vendidosCache, alertas: alertasCache, evolucao: evolucaoCache, periodos: Object.fromEntries(cache) };
     await writeFile(CACHE_FILE, JSON.stringify(obj));
   } catch {}
 }
@@ -62,6 +68,7 @@ function carregarCacheDisco() {
     const obj = JSON.parse(readFileSync(CACHE_FILE, "utf8"));
     vendidosCache = obj.vendidos || null;
     alertasCache = obj.alertas || null;
+    evolucaoCache = obj.evolucao || null;
     for (const [k, v] of Object.entries(obj.periodos || {})) cache.set(k, v);
     console.log(`  cache em disco carregado (${cache.size} periodos)`);
   } catch {}
@@ -88,6 +95,65 @@ function getAlertas() {
     return alertasCache;
   })().finally(() => (alertasEmVoo = null));
   return alertasEmVoo;
+}
+
+// --- Equipes (a API do Supremo nao tem equipe/gerente) ---
+// Definidas em equipes.json (ou na env EQUIPES_JSON, que tem prioridade). Lido a
+// cada requisicao, entao da pra editar sem reiniciar.
+function lerEquipes() {
+  try {
+    const raw = process.env.EQUIPES_JSON || readFileSync(join(__dirname, "equipes.json"), "utf8");
+    const lista = JSON.parse(raw);
+    return Array.isArray(lista) ? lista.filter((e) => e && e.id && Array.isArray(e.corretores)) : [];
+  } catch {
+    return [];
+  }
+}
+
+// --- Evolucao: semana e mes, atual x anterior ---
+// Semana = ultimos 7 dias x os 7 dias antes (igual ao filtro "Semana").
+// Mes = do dia 1 ate hoje x o mesmo trecho do mes anterior (igual ao filtro "Mes").
+function janelasEvolucao(hoje = new Date()) {
+  const d = (base, dias) => { const x = new Date(base); x.setDate(x.getDate() + dias); return x; };
+  const iniMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+  const iniMesAnt = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);
+  const fimMesAnt = new Date(hoje.getFullYear(), hoje.getMonth() - 1,
+    Math.min(hoje.getDate(), new Date(hoje.getFullYear(), hoje.getMonth(), 0).getDate()));
+  return {
+    semanaAtual: { inicio: isoDate(d(hoje, -6)), fim: isoDate(hoje) },
+    semanaAnterior: { inicio: isoDate(d(hoje, -13)), fim: isoDate(d(hoje, -7)) },
+    mesAtual: { inicio: isoDate(iniMes), fim: isoDate(hoje) },
+    mesAnterior: { inicio: isoDate(iniMesAnt), fim: isoDate(fimMesAnt) },
+  };
+}
+
+function buscarEvolucao() {
+  if (evolucaoEmVoo) return evolucaoEmVoo;
+  evolucaoEmVoo = (async () => {
+    const janelas = janelasEvolucao();
+    const datas = Object.values(janelas);
+    const inicio = datas.map((j) => j.inicio).sort()[0];
+    const fim = datas.map((j) => j.fim).sort().at(-1);
+    const vendidos = await getVendidos();
+    const { rows } = await fetchLeadsPorPeriodo(TOKEN, inicio, fim);
+    const data = agregarEvolucao({ leads: rows, vendidos, janelas });
+    data.geradoEm = new Date().toISOString();
+    evolucaoCache = { ts: Date.now(), data };
+    persistir();
+    return data;
+  })().finally(() => (evolucaoEmVoo = null));
+  return evolucaoEmVoo;
+}
+
+// Mesmo esquema stale-while-revalidate do ranking. Se o cache for de outro dia,
+// as janelas mudaram: espera a busca nova.
+async function getEvolucao() {
+  const hit = evolucaoCache?.data;
+  if (hit && hit.janelas?.mesAtual?.fim === janelasEvolucao().mesAtual.fim) {
+    if (Date.now() - evolucaoCache.ts >= CACHE_TTL * 2) buscarEvolucao().catch(() => {});
+    return hit;
+  }
+  return buscarEvolucao();
 }
 
 // Busca + agrega de verdade (custa rede). Deduplicado por periodo.
@@ -153,7 +219,7 @@ const MIME = {
 };
 
 function isoDate(d) {
-  return d.toISOString().slice(0, 10);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 }
 
 const server = createServer(async (req, res) => {
@@ -170,6 +236,13 @@ const server = createServer(async (req, res) => {
         return res.end(JSON.stringify({ erro: "Datas invalidas. Use inicio e fim no formato YYYY-MM-DD." }));
       }
       const data = await calcularRanking(inicio, fim);
+      data.equipes = lerEquipes();
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+      return res.end(JSON.stringify(data));
+    }
+
+    if (url.pathname === "/api/evolucao") {
+      const data = await getEvolucao();
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       return res.end(JSON.stringify(data));
     }
@@ -218,6 +291,9 @@ server.listen(PORT, () => {
   };
   setTimeout(aquecer, 500);
   setInterval(aquecer, CACHE_TTL);
+  // Evolucao (semana/mes x anteriores): aquece depois do mes atual e revalida com ciclo proprio.
+  setTimeout(() => buscarEvolucao().catch((e) => console.error("  [cache] falha na evolucao:", e.message)), 5000);
+  setInterval(() => buscarEvolucao().catch(() => {}), CACHE_TTL * 2);
   // Alerta global (varredura de 45 dias) tem ciclo proprio, mais espacado.
   setInterval(() => getAlertas().catch(() => {}), ALERTA_TTL);
   console.log("");

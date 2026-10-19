@@ -9,12 +9,16 @@ const brlK = (n) => {
   return "R$ " + num(n);
 };
 
-let estado = { data: null, ord: "score", view: "ranking", refreshTimer: null };
+let estado = { data: null, ord: "score", view: "ranking", refreshTimer: null, equipe: "", corretorSel: "", evolucao: null, evolucaoErro: null };
+
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
+const chave = (s) => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
 
 // textos de como cada dimensão é medida (aba metodologia)
 const DIM_DESC = {
   volume: "Nº de leads recebidos no período.",
   vendas: "Nº de vendas fechadas (leads que viraram venda).",
+  propostas: "Nº de leads recebidos no período que chegaram em Proposta (ou já viraram venda).",
   conversao: "Vendas ÷ leads recebidos.",
   contato: "Tempo entre a captura do lead e a qualificação, quanto menor, mais rápido o 1º contato.",
   mov: "Leads trabalhados ÷ leads recebidos (saíram de 'novos').",
@@ -36,7 +40,8 @@ function toggleTema() {
 }
 
 /* ---------- período ---------- */
-const isoDate = (d) => d.toISOString().slice(0, 10);
+// data local (Brasil), não UTC: depois das 21h o UTC já é o dia seguinte
+const isoDate = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 function periodoAtual() {
   const preset = $(".chip.ativo").dataset.preset;
   const hoje = new Date();
@@ -54,14 +59,20 @@ const DIMS = [
   { key: "mov", label: "Movimentação", short: "Movim.", raw: (c) => (c.leads ? c.movimentados / c.leads : 0), disp: (c) => `${Math.round((c.leads ? c.movimentados / c.leads : 0) * 100)}%` },
   { key: "consist", label: "Consistência", short: "Consist.", raw: (c) => (c.leads ? -(c.parados15d / c.leads) : 0), disp: (c) => `${c.parados15d} parados` },
 ];
-const PESOS = { vendas: 0.28, conversao: 0.2, volume: 0.16, contato: 0.16, mov: 0.1, consist: 0.1 };
+// Score: volume e movimentação ficam só no radar (o pré-atendimento é da recepção,
+// o corretor já recebe o lead qualificado). Proposta entra com peso alto porque
+// acontece mais que venda e converte bem, mostra quem está construindo resultado.
+const DIM_PROPOSTAS = { key: "propostas", label: "Propostas", short: "Propostas", raw: (c) => c.propostas || 0, disp: (c) => `${c.propostas || 0} proposta${c.propostas === 1 ? "" : "s"}` };
+const SCORE_DIMS = [DIMS[1], DIM_PROPOSTAS, DIMS[2], DIMS[3], DIMS[5]];
+const PESOS = { vendas: 0.3, propostas: 0.25, conversao: 0.2, contato: 0.15, consist: 0.1 };
 
 function calcularPerfis(corretores) {
   const cohort = corretores.filter((c) => c.leads > 0);
   if (!cohort.length) return [];
   // min/max por dimensão (ignora null)
   const stats = {};
-  for (const d of DIMS) {
+  const TODAS = [...DIMS, DIM_PROPOSTAS];
+  for (const d of TODAS) {
     const vals = cohort.map((c) => d.raw(c)).filter((v) => v != null);
     stats[d.key] = { min: Math.min(...vals), max: Math.max(...vals) };
   }
@@ -74,8 +85,8 @@ function calcularPerfis(corretores) {
   };
   const perfis = cohort.map((c) => {
     const dims = {};
-    for (const d of DIMS) dims[d.key] = norm(d, c);
-    const score = Math.round(DIMS.reduce((s, d) => s + dims[d.key] * (PESOS[d.key] || 0), 0));
+    for (const d of TODAS) dims[d.key] = norm(d, c);
+    const score = Math.round(SCORE_DIMS.reduce((s, d) => s + dims[d.key] * (PESOS[d.key] || 0), 0));
     const ord = [...DIMS].sort((a, b) => dims[b.key] - dims[a.key]);
     return {
       c, dims, score,
@@ -150,12 +161,40 @@ async function carregar({ soft = false } = {}) {
 }
 
 /* ---------- render ---------- */
+/* ---------- equipes ---------- */
+// A API do Supremo não tem equipe/gerente: vêm do equipes.json do servidor.
+function equipeAtual() {
+  return (estado.data?.equipes || []).find((e) => e.id === estado.equipe) || null;
+}
+function naEquipe(nome) {
+  const eq = equipeAtual();
+  if (!eq) return true;
+  if (!eq._set) eq._set = new Set(eq.corretores.map(chave));
+  return eq._set.has(chave(nome));
+}
+function nomeGrupo() {
+  const eq = equipeAtual();
+  return eq ? eq.nome : "Imobiliária";
+}
+function renderSeletorEquipe() {
+  const sel = $("#equipeSel");
+  const equipes = estado.data?.equipes || [];
+  if (estado.equipe && !equipes.some((e) => e.id === estado.equipe)) estado.equipe = "";
+  sel.classList.toggle("oculto", !equipes.length);
+  sel.innerHTML = `<option value="">Toda a imobiliária</option>` +
+    equipes.map((e) => `<option value="${esc(e.id)}">${esc(e.nome)}${e.gerente ? ` · ${esc(e.gerente)}` : ""}</option>`).join("");
+  sel.value = estado.equipe;
+}
+
 function render() {
   const d = estado.data;
-  const perfis = calcularPerfis(d.corretores);
+  renderSeletorEquipe();
+  // Score é sempre relativo à imobiliária inteira (não muda ao filtrar a equipe).
+  const perfis = calcularPerfis(d.corretores).filter((p) => naEquipe(p.c.nome));
   document.querySelectorAll(".view-tab").forEach((t) => t.classList.toggle("ativo", t.dataset.view === estado.view));
   if (estado.view === "metodo") return renderMetodo(perfis);
   if (estado.view === "perfil") return renderPerfil(perfis);
+  if (estado.view === "funil") return renderFunil(d);
   renderRanking(d, perfis);
 }
 
@@ -164,8 +203,20 @@ function renderRanking(d, perfis) {
   const c = $("#conteudo");
   c.innerHTML = "";
 
-  /* KPIs */
-  const r = d.resumo;
+  /* KPIs (da equipe, quando filtrada) */
+  const eq = equipeAtual();
+  const alertas = (d.alertas || []).filter((a) => naEquipe(a.corretor));
+  let r = d.resumo;
+  if (eq) {
+    const cs = d.corretores.filter((x) => naEquipe(x.nome));
+    const leads = cs.reduce((s, x) => s + x.leads, 0), vendas = cs.reduce((s, x) => s + x.vendas, 0), vgv = cs.reduce((s, x) => s + x.vgv, 0);
+    r = {
+      leads, vendas, vgv, ticketMedio: vendas ? Math.round(vgv / vendas) : 0,
+      corretoresAtivos: cs.filter((x) => x.leads > 0).length,
+      conversaoGeral: leads ? +(100 * vendas / leads).toFixed(1) : 0,
+      parados15d: alertas.length,
+    };
+  }
   const kpis = [
     { rot: "Leads no período", ico: "👥", cor: "var(--c3)", val: r.leads, sub: `${r.corretoresAtivos} corretores ativos` },
     { rot: "Vendas fechadas", ico: "🏆", cor: "var(--gold)", val: r.vendas, sub: `conversão ${r.conversaoGeral}%` },
@@ -189,7 +240,7 @@ function renderRanking(d, perfis) {
     const medals = ["🥇", "🥈", "🥉"];
     const sec = document.createElement("section");
     sec.className = "secao";
-    sec.innerHTML = `<div class="secao-hd"><h2>Pódio do período</h2><span>score = mix de vendas, conversão, volume, 1º contato, movimentação e consistência</span></div>`;
+    sec.innerHTML = `<div class="secao-hd"><h2>Pódio do período</h2><span>score = mix de vendas, propostas, conversão, 1º contato e consistência</span></div>`;
     const grid = document.createElement("div");
     grid.className = "podio";
     grid.innerHTML = ordemVisual.map((idx) => {
@@ -201,6 +252,7 @@ function renderRanking(d, perfis) {
         <div class="pod-score" data-cu="${p.score}">0<small> pts</small></div>
         <div class="pod-stats">
           <div><b>${p.c.vendas}</b><span>vendas</span></div>
+          <div><b>${p.c.propostas || 0}</b><span>propostas</span></div>
           <div><b>${p.c.conversao}%</b><span>conv.</span></div>
           <div><b>${p.c.tempoQualifHoras == null ? "n/d" : p.c.tempoQualifHoras + "h"}</b><span>1º contato</span></div>
         </div>
@@ -215,6 +267,7 @@ function renderRanking(d, perfis) {
     { key: "score", lab: "Score" },
     { key: "leads", lab: "Leads" },
     { key: "contato", lab: "1º contato" },
+    { key: "propostas", lab: "Propostas" },
     { key: "vendas", lab: "Vendas" },
     { key: "vgv", lab: "VGV", hide: true },
     { key: "conversao", lab: "Conversão" },
@@ -242,18 +295,19 @@ function renderRanking(d, perfis) {
       <td><div class="rk">
         <span class="rk-pos ${i < 3 ? "m" : ""}">${i < 3 ? ["🥇", "🥈", "🥉"][i] : i + 1}</span>
         <span class="rk-av" style="background:linear-gradient(150deg,${cor},${cor}bb)">${iniciais(p.c.nome)}</span>
-        <span><span class="rk-nome">${p.c.nome.trim()}</span><br><span class="rk-sub">${p.c.leads} leads · ${p.c.movimentados} movim.</span></span>
+        <span><span class="rk-nome">${p.c.nome.trim()}</span><br><span class="rk-sub">${p.c.leads} leads · ${DIM_PROPOSTAS.disp(p.c)}</span></span>
       </div></td>
       <td><span class="score-cell">${p.score}</span><span class="mini-bar"><i style="width:${(p.score / maxScore) * 100}%"></i></span></td>
       <td><span class="cell-num">${p.c.leads}</span></td>
       <td><span class="cell-num">${p.c.tempoQualifHoras == null ? "n/d" : p.c.tempoQualifHoras + "h"}</span></td>
+      <td><span class="cell-num">${p.c.propostas || 0}</span></td>
       <td><span class="cell-num">${p.c.vendas}</span></td>
       <td class="hide-sm"><span class="cell-num">${brlK(p.c.vgv)}</span></td>
       <td><span class="pill ${p.c.conversao >= 3 ? "g" : "n"}">${p.c.conversao}%</span></td>
       <td>${p.c.parados15d ? `<span class="pill r">${p.c.parados15d}</span>` : `<span class="pill n">0</span>`}</td>
     </tr>`;
   }).join("");
-  wrap.innerHTML = `<table>${thead}<tbody>${tbody || `<tr><td colspan="8" class="vazio">Sem dados no período.</td></tr>`}</tbody></table>`;
+  wrap.innerHTML = `<table>${thead}<tbody>${tbody || `<tr><td colspan="9" class="vazio">Sem dados no período.</td></tr>`}</tbody></table>`;
   wrap.querySelectorAll("th[data-k]").forEach((th) => th.addEventListener("click", () => { estado.ord = th.dataset.k; render(); }));
   sec2.appendChild(wrap);
   c.appendChild(sec2);
@@ -265,8 +319,8 @@ function renderRanking(d, perfis) {
   const box = document.createElement("div");
   box.className = "alertas-box";
   if (!d.alertasProntos) box.innerHTML = `<div class="vazio">⏳ Calculando varredura dos últimos ${d.alertaJanelaDias || 45} dias… recarrega em instantes.</div>`;
-  else if (!d.alertas.length) box.innerHTML = `<div class="vazio">🎉 Nenhum lead parado além de 15 dias.</div>`;
-  else box.innerHTML = d.alertas.slice(0, 12).map((a) => `
+  else if (!alertas.length) box.innerHTML = `<div class="vazio">🎉 Nenhum lead parado além de 15 dias.</div>`;
+  else box.innerHTML = alertas.slice(0, 12).map((a) => `
     <div class="alerta-row">
       <div class="alerta-dias"><b>${a.diasParado}</b><span>dias</span></div>
       <div class="alerta-info">
@@ -315,7 +369,7 @@ function renderPerfil(perfis) {
   const c = $("#conteudo");
   c.innerHTML = "";
   const sec = document.createElement("section");
-  sec.innerHTML = `<div class="secao-hd" style="margin-top:6px"><h2>Perfil comportamental</h2><span>${perfis.length} corretores · 6 dimensões, normalizadas entre os corretores do período</span></div>`;
+  sec.innerHTML = `<div class="secao-hd" style="margin-top:6px"><h2>Perfil comportamental</h2><span>${perfis.length} corretores · 6 dimensões, normalizadas entre os corretores do período · Volume e Movimentação ficam só aqui, fora do score</span></div>`;
   const grid = document.createElement("div");
   grid.className = "radar-grid";
   grid.innerHTML = perfis.length ? perfis.map((p, i) => radarCardHTML(p, i)).join("") : `<div class="vazio">Sem corretores com leads no período.</div>`;
@@ -327,14 +381,15 @@ function renderPerfil(perfis) {
 function renderMetodo(perfis) {
   const c = $("#conteudo");
   c.innerHTML = "";
-  const ordPeso = [...DIMS].sort((a, b) => (PESOS[b.key] || 0) - (PESOS[a.key] || 0));
+  const ordPeso = [...SCORE_DIMS].sort((a, b) => (PESOS[b.key] || 0) - (PESOS[a.key] || 0));
+  const maxPeso = Math.max(...Object.values(PESOS)) * 100;
 
   // 1) intro
   const intro = document.createElement("section");
   intro.className = "anim";
   intro.innerHTML = `<div class="card">
-    <div class="big-note">O <em>Score de Performance</em> é uma nota de <em>0 a 100</em> que resume 6 métricas do corretor num número só.</div>
-    <p style="margin-top:14px">É <b>relativo ao grupo do período</b>: cada corretor é comparado com os outros que tiveram leads naquele intervalo. Em cada métrica, o melhor do grupo vira 100, o pior vira 0, e o resto fica proporcional no meio. Depois somamos essas notas com pesos diferentes.</p>
+    <div class="big-note">O <em>Score de Performance</em> é uma nota de <em>0 a 100</em> que resume ${SCORE_DIMS.length} métricas do corretor num número só.</div>
+    <p style="margin-top:14px">É <b>relativo ao grupo do período</b>: cada corretor é comparado com os outros corretores da imobiliária que tiveram leads naquele intervalo (mesmo com uma equipe filtrada). Em cada métrica, o melhor do grupo vira 100, o pior vira 0, e o resto fica proporcional no meio. Depois somamos essas notas com pesos diferentes.</p>
   </div>`;
   c.appendChild(intro);
 
@@ -342,7 +397,7 @@ function renderMetodo(perfis) {
   const dims = document.createElement("section");
   dims.className = "secao anim";
   dims.style.animationDelay = "70ms";
-  dims.innerHTML = `<div class="secao-hd"><h2>As 6 dimensões e seus pesos</h2><span>somam 100%</span></div>`;
+  dims.innerHTML = `<div class="secao-hd"><h2>As ${SCORE_DIMS.length} métricas e seus pesos</h2><span>somam 100%</span></div>`;
   const cardD = document.createElement("div");
   cardD.className = "card";
   cardD.innerHTML = ordPeso.map((d, i) => {
@@ -351,7 +406,7 @@ function renderMetodo(perfis) {
       <span class="dim-dot" style="background:${PALETA[i % PALETA.length]}"></span>
       <span class="dim-nome">${d.label}</span>
       <span class="dim-desc">${DIM_DESC[d.key]}</span>
-      <span class="peso-track"><i style="width:${peso / 28 * 100}%"></i></span>
+      <span class="peso-track"><i style="width:${peso / maxPeso * 100}%"></i></span>
       <span class="dim-peso">${peso}%</span>
     </div>`;
   }).join("");
@@ -361,7 +416,7 @@ function renderMetodo(perfis) {
   // 3) exemplo real com o líder
   if (perfis.length) {
     const lider = perfis[0];
-    const linhas = DIMS.map((d) => ({
+    const linhas = SCORE_DIMS.map((d) => ({
       label: d.label, valor: d.disp(lider.c),
       nota: lider.dims[d.key], peso: Math.round((PESOS[d.key] || 0) * 100),
       contrib: lider.dims[d.key] * (PESOS[d.key] || 0),
@@ -403,10 +458,228 @@ function renderMetodo(perfis) {
     <li><b>É relativo, não absoluto.</b> O mesmo corretor pode ter score diferente se você muda o período ou o conjunto de colegas comparados.</li>
     <li><b>1º contato</b> é o tempo entre a captura do lead e a qualificação, quanto menor, melhor a nota.</li>
     <li><b>Consistência</b> é medida por lead: um corretor com muitos leads e alguns parados pode pontuar melhor que outro com poucos leads e vários parados.</li>
-    <li><b>Os pesos são ajustáveis.</b> Se para a Lion vale mais volume, ou punir mais os leads parados, é só recalibrar.</li>
-  </ul>`;
+    <li><b>Volume e Movimentação não entram no score.</b> O pré-atendimento é feito pela recepção e o corretor já recebe o lead qualificado, então quantos leads ele recebe não depende dele. As duas continuam no perfil comportamental, pra ver quem recebe muito e converte pouco.</li>
+    <li><b>Propostas</b> tem peso alto porque acontece com mais frequência que a venda e converte bem: mostra quem está construindo resultado antes do fechamento. Conta os leads recebidos no período que estão em Proposta ou já viraram venda.</li>
+    <li><b>Os pesos são ajustáveis.</b> Se para a Lion vale mais proposta, ou punir mais os leads parados, é só recalibrar.</li>
+  </ul>
+  </div>`;
   cav.appendChild(cardC);
   c.appendChild(cav);
+
+  // 5) funil
+  const fun = document.createElement("section");
+  fun.className = "secao anim";
+  fun.style.animationDelay = "260ms";
+  fun.innerHTML = `<div class="secao-hd"><h2>Como o funil é calculado</h2></div>`;
+  const cardF = document.createElement("div");
+  cardF.className = "card";
+  cardF.innerHTML = `<ul class="caveats">
+    <li><b>O funil começa em Qualificado.</b> A etapa Lead → Qualificado é do pré-atendimento, então todo lead que chegou ao corretor conta como Qualificado.</li>
+    <li><b>As etapas vêm da situação do lead no Supremo:</b> Agendamento ou Análise de crédito → Agendamento/Crédito; Visita; Proposta; Venda (lead vendido).</li>
+    <li><b>Etapa pulada conta como passada.</b> Um lead que foi de Qualificado direto pra Visita conta também em Agendamento/Crédito. Lead perdido conta até a situação em que estava quando foi perdido.</li>
+    <li><b>Taxa de passagem</b> = quantos chegaram na etapa ÷ quantos chegaram na etapa anterior. O <b>gargalo</b> é a passagem em que o corretor mais fica abaixo da equipe (só conta quando ele tem pelo menos ${MIN_GARGALO} leads na etapa anterior).</li>
+    <li><b>Funil = leads recebidos no período.</b> Mostra até onde chegaram os leads capturados no intervalo, por isso a Venda do funil pode ser menor que "Vendas fechadas" (que conta pela data da venda, inclusive leads de meses anteriores). Leads muito recentes ainda não tiveram tempo de avançar.</li>
+    <li><b>A API só mostra a situação atual,</b> sem o histórico. Se o corretor não atualiza a situação no Supremo, o lead fica parado em Qualificado no funil.</li>
+  </ul>`;
+  fun.appendChild(cardF);
+  c.appendChild(fun);
+}
+
+/* ---------- render: aba "funil" ---------- */
+const MIN_GARGALO = 3; // mínimo de leads na etapa anterior pra uma passagem valer como gargalo
+const ETAPAS_PADRAO = ["Qualificado", "Agendamento/Crédito", "Visita", "Proposta", "Venda"];
+const somaFunil = (lista) => lista.reduce((acc, f) => acc.map((v, i) => v + (f[i] || 0)), ETAPAS_PADRAO.map(() => 0));
+// taxa de passagem i-1 -> i (null quando não há base)
+const taxa = (f, i) => (f[i - 1] ? (100 * f[i]) / f[i - 1] : null);
+const pct = (v) => (v == null ? "—" : `${v.toLocaleString("pt-BR", { maximumFractionDigits: v < 10 ? 1 : 0 })}%`);
+
+// Passagem em que o corretor mais fica abaixo da referência (equipe).
+function gargalo(f, ref) {
+  let pior = null;
+  for (let i = 1; i < f.length; i++) {
+    const t = taxa(f, i), tr = taxa(ref, i);
+    if (t == null || tr == null || f[i - 1] < MIN_GARGALO) continue;
+    const delta = t - tr;
+    if (delta < 0 && (!pior || delta < pior.delta)) pior = { i, delta };
+  }
+  return pior;
+}
+
+function funilCardHTML(titulo, sub, f, ref, refNome, etapas) {
+  const topo = Math.max(1, f[0]);
+  const linhas = etapas.map((nome, i) => {
+    const t = i ? taxa(f, i) : null, tr = i && ref ? taxa(ref, i) : null;
+    let cmp = "";
+    if (i && ref) {
+      const cls = t == null || tr == null ? "n" : t >= tr ? "g" : "r";
+      cmp = `<span class="fn-ref ${cls}">${refNome} ${pct(tr)}</span>`;
+    }
+    return `<div class="fn-row">
+      <div class="fn-nome">${nome}</div>
+      <div class="fn-bar"><i style="width:${Math.max(f[i] ? 2 : 0, (f[i] / topo) * 100)}%;--fc:${PALETA[i % PALETA.length]}"></i><b>${num(f[i])}</b></div>
+      <div class="fn-tx">${i ? `<span class="fn-pass">${pct(t)}</span><small>passaram</small>` : `<small>base do funil</small>`}${cmp}</div>
+    </div>`;
+  }).join("");
+  return `<div class="card fn-card"><div class="fn-hd"><h3>${titulo}</h3><span>${sub}</span></div>${linhas}</div>`;
+}
+
+function evolucaoHTML(ev, nomes, alvo) {
+  if (estado.evolucaoErro && !ev) return `<div class="card vazio">Não consegui calcular a evolução: ${esc(estado.evolucaoErro)}</div>`;
+  if (!ev) return `<div class="card vazio">⏳ Calculando semana e mês anteriores… a 1ª vez pode levar ~1 min.</div>`;
+  const doGrupo = (k) => {
+    const js = nomes.map((n) => ev.porChave[chave(n)]?.[k]).filter(Boolean);
+    return { funil: somaFunil(js.map((j) => j.funil)), vendas: js.reduce((s, j) => s + j.vendas, 0) };
+  };
+  const fmtD = (iso) => iso.slice(8, 10) + "/" + iso.slice(5, 7);
+  const bloco = (titulo, kA, kB) => {
+    const a = doGrupo(kA), b = doGrupo(kB), ja = ev.janelas[kA], jb = ev.janelas[kB];
+    const met = [
+      ...ETAPAS_PADRAO.slice(0, 4).map((nome, i) => ({ nome: i ? nome : "Qualificados recebidos", a: a.funil[i], b: b.funil[i] })),
+      { nome: "Vendas fechadas", a: a.vendas, b: b.vendas },
+      { nome: "Qualificado → Proposta", a: a.funil[0] ? (100 * a.funil[3]) / a.funil[0] : null, b: b.funil[0] ? (100 * b.funil[3]) / b.funil[0] : null, taxa: true },
+    ];
+    const linhas = met.map((m) => {
+      let delta = "";
+      if (m.a != null && m.b != null) {
+        const dv = m.a - m.b;
+        const txt = m.taxa ? `${dv > 0 ? "+" : ""}${dv.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} p.p.`
+          : m.b ? `${dv > 0 ? "+" : ""}${Math.round((100 * dv) / m.b)}%` : dv ? `+${dv}` : "=";
+        delta = `<span class="pill ${dv > 0 ? "g" : dv < 0 ? "r" : "n"}">${dv > 0 ? "▲" : dv < 0 ? "▼" : ""} ${txt}</span>`;
+      }
+      const v = (x) => (m.taxa ? pct(x) : num(x));
+      return `<tr><td>${m.nome}</td><td class="cell-num">${v(m.a)}</td><td class="cell-num">${v(m.b)}</td><td>${delta}</td></tr>`;
+    }).join("");
+    return `<div><h3 class="evo-tit">${titulo}</h3><div class="tabela-wrap rolavel"><table>
+      <thead><tr><th>Métrica</th><th>${fmtD(ja.inicio)}–${fmtD(ja.fim)}</th><th>${fmtD(jb.inicio)}–${fmtD(jb.fim)}</th><th>Variação</th></tr></thead>
+      <tbody>${linhas}</tbody></table></div></div>`;
+  };
+  return `<div class="evo-grid">
+    ${bloco("Semana · últimos 7 dias × 7 dias antes", "semanaAtual", "semanaAnterior")}
+    ${bloco("Mês · mês atual × mesmo trecho do mês anterior", "mesAtual", "mesAnterior")}
+  </div><p class="nota">Evolução de ${esc(alvo)}. Etapas = leads recebidos em cada janela e até onde chegaram; vendas pela data da venda.</p>`;
+}
+
+function renderFunil(d) {
+  const c = $("#conteudo");
+  c.innerHTML = "";
+  const etapas = d.etapasFunil || ETAPAS_PADRAO;
+  const grupo = nomeGrupo();
+  const corretores = d.corretores.filter((x) => naEquipe(x.nome) && x.funil && x.leads > 0);
+  const fGrupo = somaFunil(corretores.map((x) => x.funil));
+  const fImob = somaFunil(d.corretores.filter((x) => x.funil).map((x) => x.funil));
+  if (estado.corretorSel && !corretores.some((x) => x.nome === estado.corretorSel)) estado.corretorSel = "";
+  const sel = corretores.find((x) => x.nome === estado.corretorSel);
+  const per = `${d.periodo.inicio.split("-").reverse().join("/")} a ${d.periodo.fim.split("-").reverse().join("/")}`;
+
+  /* seletor de corretor */
+  const top = document.createElement("section");
+  top.className = "fn-top anim";
+  top.innerHTML = `<label>Ver funil de
+    <select id="corretorSel" class="sel">
+      <option value="">${esc(grupo === "Imobiliária" ? "Toda a imobiliária" : grupo)} (resultado geral)</option>
+      ${[...corretores].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")).map((x) => `<option value="${esc(x.nome)}" ${x.nome === estado.corretorSel ? "selected" : ""}>${esc(x.nome.trim())}</option>`).join("")}
+    </select></label>
+    <span class="fn-per">leads recebidos de ${per}</span>`;
+  top.querySelector("#corretorSel").addEventListener("change", (e) => { estado.corretorSel = e.target.value; render(); });
+  c.appendChild(top);
+
+  /* funil (individual x equipe, ou equipe x imobiliária) */
+  const secF = document.createElement("section");
+  secF.className = "fn-duo anim";
+  secF.style.animationDelay = "60ms";
+  if (sel) {
+    secF.innerHTML = funilCardHTML(esc(sel.nome.trim()), `${num(sel.funil[0])} qualificados recebidos`, sel.funil, fGrupo, grupo === "Imobiliária" ? "imob." : "equipe", etapas)
+      + funilCardHTML(esc(grupo === "Imobiliária" ? "Imobiliária" : grupo), `${corretores.length} corretores · referência`, fGrupo, null, "", etapas);
+  } else {
+    const eq = equipeAtual();
+    secF.innerHTML = funilCardHTML(esc(eq ? eq.nome : "Imobiliária"), `${corretores.length} corretores · ${num(fGrupo[0])} qualificados recebidos`, fGrupo, eq ? fImob : null, "imob.", etapas)
+      + (eq ? funilCardHTML("Imobiliária", "referência", fImob, null, "", etapas) : "");
+    secF.classList.toggle("solo", !eq);
+  }
+  c.appendChild(secF);
+
+  /* comparativo da equipe */
+  const sec2 = document.createElement("section");
+  sec2.className = "secao anim";
+  sec2.style.animationDelay = "120ms";
+  sec2.innerHTML = `<div class="secao-hd"><h2>Comparativo ${grupo === "Imobiliária" ? "dos corretores" : "da equipe"}</h2><span>taxa de passagem entre etapas · <b class="txt-red">vermelho</b> = gargalo (maior queda vs ${grupo === "Imobiliária" ? "a imobiliária" : "a equipe"}) · clique num corretor pra abrir o funil dele</span></div>`;
+  const CURTO = ["Qualif.", "Agend./Créd.", "Visita", "Proposta", "Venda"];
+  const passagens = CURTO.slice(1).map((e, i) => `${CURTO[i]} → ${e}`);
+  const linhaRef = `<tr class="fn-ref-row"><td><b>${esc(grupo)}</b></td><td class="cell-num">${num(fGrupo[0])}</td>${passagens.map((_, i) => `<td class="cell-num">${pct(taxa(fGrupo, i + 1))}</td>`).join("")}<td class="cell-num">${pct(fGrupo[0] ? (100 * fGrupo[4]) / fGrupo[0] : null)}</td><td></td></tr>`;
+  const linhas = [...corretores].sort((a, b) => b.funil[0] - a.funil[0]).map((x) => {
+    const g = gargalo(x.funil, fGrupo);
+    return `<tr class="clicavel ${x.nome === estado.corretorSel ? "sel" : ""}" data-nome="${esc(x.nome)}">
+      <td><span class="rk-nome">${esc(x.nome.trim())}</span></td>
+      <td class="cell-num">${num(x.funil[0])}</td>
+      ${passagens.map((_, i) => {
+        const t = taxa(x.funil, i + 1);
+        const cls = g && g.i === i + 1 ? "gargalo" : x.funil[i] < MIN_GARGALO ? "fraco" : "";
+        return `<td class="cell-num ${cls}" title="${num(x.funil[i + 1])} de ${num(x.funil[i])}">${pct(t)}</td>`;
+      }).join("")}
+      <td class="cell-num">${pct(x.funil[0] ? (100 * x.funil[4]) / x.funil[0] : null)}</td>
+      <td>${g ? `<span class="pill r">→ ${CURTO[g.i]} ${Math.round(g.delta)} p.p.</span>` : `<span class="pill n">—</span>`}</td>
+    </tr>`;
+  }).join("");
+  const wrap = document.createElement("div");
+  wrap.className = "tabela-wrap rolavel";
+  wrap.innerHTML = `<table class="fn-tab"><thead><tr><th>Corretor</th><th>Qualif.</th>${passagens.map((p) => `<th>${p}</th>`).join("")}<th>Qualif. → Venda</th><th>Gargalo</th></tr></thead>
+    <tbody>${linhaRef}${linhas || `<tr><td colspan="${passagens.length + 4}" class="vazio">Sem leads no período.</td></tr>`}</tbody></table>`;
+  wrap.querySelectorAll("tr[data-nome]").forEach((tr) => tr.addEventListener("click", () => {
+    estado.corretorSel = tr.dataset.nome;
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }));
+  sec2.appendChild(wrap);
+  c.appendChild(sec2);
+
+  /* leads parados */
+  const alvoNomes = sel ? [sel.nome] : corretores.map((x) => x.nome);
+  const alvoChaves = new Set(alvoNomes.map(chave));
+  const parados = (d.alertas || []).filter((a) => alvoChaves.has(chave(a.corretor)));
+  const sec3 = document.createElement("section");
+  sec3.className = "secao anim";
+  sec3.style.animationDelay = "160ms";
+  sec3.innerHTML = `<div class="secao-hd"><h2>🚨 Leads parados${sel ? ` de ${esc(sel.nome.trim())}` : ""}</h2><span>ativos, sem movimentação há +15 dias · capturados nos últimos ${d.alertaJanelaDias || 45} dias</span></div>`;
+  const box = document.createElement("div");
+  box.className = "alertas-box";
+  if (!d.alertasProntos) box.innerHTML = `<div class="vazio">⏳ Calculando varredura… recarrega em instantes.</div>`;
+  else if (!parados.length) box.innerHTML = `<div class="vazio">🎉 Nenhum lead parado além de 15 dias.</div>`;
+  else box.innerHTML = parados.map((a) => `
+    <div class="alerta-row">
+      <div class="alerta-dias"><b>${a.diasParado}</b><span>dias</span></div>
+      <div class="alerta-info">
+        <div class="l">${esc(a.lead)} ${a.telefone ? `<span class="alerta-tel">· ${esc(a.telefone)}</span>` : ""}</div>
+        <div class="m">${sel ? "" : `<span class="tag-corr">${esc(a.corretor.trim())}</span> · `}etapa atual: <b>${esc(a.etapaFunil || "Qualificado")}</b>${a.situacao ? ` · situação ${esc(a.situacao.trim())}` : ""}</div>
+      </div>
+    </div>`).join("");
+  sec3.appendChild(box);
+  c.appendChild(sec3);
+
+  /* evolução */
+  const sec4 = document.createElement("section");
+  sec4.className = "secao anim";
+  sec4.style.animationDelay = "200ms";
+  sec4.innerHTML = `<div class="secao-hd"><h2>Evolução</h2><span>comparação com a semana e o mês anteriores · não depende do filtro de período</span></div>`;
+  const evBox = document.createElement("div");
+  evBox.innerHTML = evolucaoHTML(estado.evolucao, alvoNomes, sel ? sel.nome.trim() : grupo === "Imobiliária" ? "toda a imobiliária" : grupo);
+  sec4.appendChild(evBox);
+  c.appendChild(sec4);
+}
+
+async function carregarEvolucao() {
+  try {
+    const r = await fetch("/api/evolucao");
+    const ev = await r.json();
+    if (!r.ok) throw new Error(ev.detalhe || ev.erro || "Falha");
+    // indexa por nome normalizado (equipes.json pode vir com acento/caixa diferente)
+    ev.porChave = {};
+    for (const [nome, v] of Object.entries(ev.corretores || {})) ev.porChave[chave(nome)] = v;
+    estado.evolucao = ev;
+    estado.evolucaoErro = null;
+  } catch (e) {
+    estado.evolucaoErro = e.message;
+  }
+  if (estado.data && estado.view === "funil") render();
 }
 
 /* ---------- eventos ---------- */
@@ -424,6 +697,16 @@ $("#chips").addEventListener("click", (e) => {
 });
 $("#aplicar").addEventListener("click", () => carregar());
 $("#themeToggle").addEventListener("click", toggleTema);
+// Equipe vai na URL (?equipe=id): cada gerente pode salvar o link da própria equipe.
+$("#equipeSel").addEventListener("change", (e) => {
+  estado.equipe = e.target.value;
+  estado.corretorSel = "";
+  const u = new URL(location.href);
+  if (estado.equipe) u.searchParams.set("equipe", estado.equipe); else u.searchParams.delete("equipe");
+  history.replaceState(null, "", u);
+  if (estado.data) render();
+});
+estado.equipe = new URL(location.href).searchParams.get("equipe") || "";
 
 (function initDatas() {
   const hoje = new Date();
@@ -432,5 +715,6 @@ $("#themeToggle").addEventListener("click", toggleTema);
 })();
 
 carregar();
+carregarEvolucao();
 // auto-refresh para o modo TV
-setInterval(() => carregar({ soft: true }), 3 * 60 * 1000);
+setInterval(() => { carregar({ soft: true }); carregarEvolucao(); }, 3 * 60 * 1000);

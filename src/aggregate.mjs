@@ -13,6 +13,11 @@ function parseData(s) {
   return isNaN(d) ? null : d;
 }
 
+// YYYY-MM-DD no fuso local (toISOString daria o dia seguinte para 23:59 em UTC-3)
+function dataLocal(d) {
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+
 function nomeLimpo(s) {
   return (s || "").trim();
 }
@@ -31,6 +36,34 @@ function mediana(arr) {
 function dentro(d, ini, fim) {
   if (!d) return false;
   return d >= ini && d <= fim;
+}
+
+// --- Funil do corretor ---
+// Comeca em Qualificado: Lead -> Qualificado e do pre-atendimento (recepcao), entao
+// todo lead que chegou ao corretor ja conta como Qualificado. As demais etapas vem
+// da "situacao" atual do lead no Supremo (a API nao guarda historico). Etapa pulada
+// conta como passada: um lead em Visita conta tambem em Agendamento/Credito. Lead
+// perdido conta ate a situacao em que foi perdido.
+export const ETAPAS_FUNIL = ["Qualificado", "Agendamento/Crédito", "Visita", "Proposta", "Venda"];
+
+function semAcento(s) {
+  return (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase();
+}
+
+// Indice (0..4) da etapa mais avancada que o lead alcancou.
+export function nivelFunil(l) {
+  if (String(l.etapa ?? "") === "4") return 4;
+  const s = semAcento(l.nome_situacao);
+  if (s.startsWith("venda")) return 4;
+  if (s.includes("proposta")) return 3;
+  if (s.includes("visita")) return 2;
+  if (s.includes("agendamento") || s.includes("credito")) return 1;
+  return 0;
+}
+
+const funilVazio = () => ETAPAS_FUNIL.map(() => 0);
+function somarNoFunil(funil, nivel) {
+  for (let i = 0; i <= nivel; i++) funil[i]++;
 }
 
 // Varredura independente de leads ATIVOS parados ha mais de `diasLimite` dias
@@ -59,6 +92,7 @@ export function escanearParados(leads, agora, diasLimite = 15) {
       corretor,
       etapa: l.nome_etapa,
       situacao: l.nome_situacao,
+      etapaFunil: ETAPAS_FUNIL[nivelFunil(l)],
       diasParado,
       desde: l.data_ultima_interacao || l.data_com_corretor || l.data_qualificado || l.data_captura,
     });
@@ -86,7 +120,7 @@ export function agregar({ leadsPeriodo, vendidos, periodo, agora }) {
     if (!corretores.has(nome))
       corretores.set(nome, {
         nome, leads: 0, movimentados: 0, vendas: 0, vgv: 0,
-        perdidos: 0, ativos: 0, parados15d: 0, tempoQualifMin: [],
+        perdidos: 0, ativos: 0, parados15d: 0, tempoQualifMin: [], funil: funilVazio(),
       });
     return corretores.get(nome);
   };
@@ -133,6 +167,7 @@ export function agregar({ leadsPeriodo, vendidos, periodo, agora }) {
     if (!ehPseudo(corretor)) {
       const c = getC(corretor);
       c.leads++;
+      somarNoFunil(c.funil, nivelFunil(l));
       if (etapa === "5") c.perdidos++;
       // "movimentado" = saiu de LEADS NOVOS (foi trabalhado)
       if (etapa !== "1") c.movimentados++;
@@ -155,6 +190,7 @@ export function agregar({ leadsPeriodo, vendidos, periodo, agora }) {
               corretor,
               etapa: l.nome_etapa,
               situacao: l.nome_situacao,
+              etapaFunil: ETAPAS_FUNIL[nivelFunil(l)],
               diasParado,
               desde: (ult === dInteracao && l.data_ultima_interacao) || l.data_com_corretor || l.data_qualificado || l.data_captura,
             });
@@ -209,6 +245,9 @@ export function agregar({ leadsPeriodo, vendidos, periodo, agora }) {
       ativos: c.ativos,
       parados15d: c.parados15d,
       tempoQualifHoras: tqMed != null ? +(tqMed / 60).toFixed(1) : null,
+      // funil da coorte (leads recebidos no periodo): [Qualificado, Agend/Credito, Visita, Proposta, Venda]
+      funil: c.funil,
+      propostas: c.funil[3],
     };
   });
 
@@ -242,8 +281,8 @@ export function agregar({ leadsPeriodo, vendidos, periodo, agora }) {
 
   return {
     periodo: {
-      inicio: inicio.toISOString().slice(0, 10),
-      fim: fim.toISOString().slice(0, 10),
+      inicio: dataLocal(inicio),
+      fim: dataLocal(fim),
     },
     resumo: {
       leads: leadsPeriodo.length,
@@ -254,6 +293,7 @@ export function agregar({ leadsPeriodo, vendidos, periodo, agora }) {
       parados15d: alertas.length,
       conversaoGeral: leadsPeriodo.length ? +(100 * totalVendas / leadsPeriodo.length).toFixed(1) : 0,
     },
+    etapasFunil: ETAPAS_FUNIL,
     corretores: listaCorretores,
     qualificadores: listaQualificadores,
     origens: listaOrigens,
@@ -262,4 +302,40 @@ export function agregar({ leadsPeriodo, vendidos, periodo, agora }) {
     evolucao,
     alertas,
   };
+}
+
+// Evolucao: compara janelas fixas (semana e mes, atual x anterior) por corretor.
+// Entrada: leads capturados cobrindo todas as janelas + todos os vendidos.
+// Por janela e corretor: funil da coorte (leads capturados na janela) e vendas
+// fechadas na janela (pela data da venda, igual ao ranking).
+export function agregarEvolucao({ leads, vendidos, janelas }) {
+  const lim = Object.fromEntries(Object.entries(janelas).map(([k, j]) => [k, {
+    ini: new Date(`${j.inicio}T00:00:00`), fim: new Date(`${j.fim}T23:59:59`),
+  }]));
+  const corretores = {};
+  const getC = (nome) => (corretores[nome] ||= Object.fromEntries(
+    Object.keys(janelas).map((k) => [k, { funil: funilVazio(), vendas: 0, vgv: 0 }])
+  ));
+
+  for (const l of leads) {
+    const corretor = nomeLimpo(l.nome_corretor);
+    if (ehPseudo(corretor)) continue;
+    const d = parseData(l.data_captura);
+    const nivel = nivelFunil(l);
+    for (const [k, { ini, fim }] of Object.entries(lim)) {
+      if (dentro(d, ini, fim)) somarNoFunil(getC(corretor)[k].funil, nivel);
+    }
+  }
+  for (const v of vendidos) {
+    const corretor = nomeLimpo(v.nome_corretor);
+    if (ehPseudo(corretor)) continue;
+    const d = parseData(v.data_vendido_perdido);
+    for (const [k, { ini, fim }] of Object.entries(lim)) {
+      if (!dentro(d, ini, fim)) continue;
+      const j = getC(corretor)[k];
+      j.vendas++;
+      j.vgv += Number(v.valor_vendido) || 0;
+    }
+  }
+  return { etapasFunil: ETAPAS_FUNIL, janelas, corretores };
 }
