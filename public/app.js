@@ -1,6 +1,5 @@
 /* Ranking de Corretores, Lion. Frontend (sem dependências). */
 const $ = (s, r = document) => r.querySelector(s);
-const PALETA = ["#f0a51e", "#8b5cf6", "#3b82f6", "#10b981", "#ec4899", "#f97316"];
 const num = (n) => (n || 0).toLocaleString("pt-BR");
 const brlK = (n) => {
   n = n || 0;
@@ -9,39 +8,67 @@ const brlK = (n) => {
   return "R$ " + num(n);
 };
 
-let estado = { data: null, ord: "score", view: "ranking", refreshTimer: null, equipe: "", corretorSel: "", evolucao: null, evolucaoErro: null, evoJanela: "semana", paradosTodos: false };
+let estado = { data: null, ord: "score", view: "ranking", equipe: "", corretorSel: "", evolucao: null, evolucaoErro: null, evoJanela: "semana", paradosTodos: false };
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
-const chave = (s) => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+const chave = (s) => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+const plural = (n, um, varios) => `${num(n)} ${n === 1 ? um : varios}`;
 
-// textos de como cada dimensão é medida (aba metodologia)
+/* ---------- ícones (traço fino, herdam a cor do texto) ---------- */
+const ICO_PATHS = {
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+  proposta: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/>',
+  trofeu: '<path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/>',
+  moeda: '<circle cx="12" cy="12" r="9"/><path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .8-3 2s1.3 1.7 3 2 3 .8 3 2-1.3 2-3 2c-1.4 0-2.5-.5-3-1.5M12 6.5v11"/>',
+  alerta: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+  relogio: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  seta: '<path d="M7 17 17 7M8 7h9v9"/>',
+  sol: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  lua: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
+  agenda: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  casa: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/>',
+  check: '<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
+  chave: '<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3M17 6l3 3M15 8l2 2"/>',
+  alvo: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>',
+  pct: '<path d="M19 5 5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/>',
+  escudo: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+  movim: '<path d="m3 17 6-6 4 4 8-8M14 7h7v7"/>',
+};
+const ico = (k) => `<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICO_PATHS[k] || ""}</svg>`;
+
+// textos de como cada dimensão é medida
 const DIM_DESC = {
   volume: "Nº de leads recebidos no período.",
   vendas: "Nº de vendas fechadas (leads que viraram venda).",
-  propostas: "Nº de leads recebidos no período que chegaram em Proposta (ou já viraram venda).",
+  propostas: "Leads recebidos no período que chegaram em Proposta (ou já viraram venda).",
   conversao: "Vendas ÷ leads recebidos.",
-  contato: "Tempo entre a captura do lead e a qualificação, quanto menor, mais rápido o 1º contato.",
+  contato: "Tempo entre a captura do lead e a qualificação. Quanto menor, mais rápido.",
   mov: "Leads trabalhados ÷ leads recebidos (saíram de 'novos').",
-  consist: "Leads parados +15 dias por lead, quanto menos, melhor.",
+  consist: "Leads parados +15 dias por lead. Quanto menos, melhor.",
 };
+const DIM_ICO = { volume: "users", vendas: "trofeu", propostas: "proposta", conversao: "pct", contato: "relogio", mov: "movim", consist: "escudo" };
 
 /* ---------- tema ---------- */
-(function initTema() {
-  // Padrão: escuro (mais forte para exibição em TV). Usuário pode alternar.
-  const tema = localStorage.getItem("tema") || "dark";
-  document.documentElement.setAttribute("data-theme", tema);
-})();
+// Padrão claro (como a referência). A escolha fica salva no navegador.
+const TEMA_KEY = "tema-v3";
+function lerTema() { try { return localStorage.getItem(TEMA_KEY) || "light"; } catch { return "light"; } }
+function aplicarTema(t) {
+  document.documentElement.setAttribute("data-theme", t);
+  $("#themeToggle").innerHTML = ico(t === "dark" ? "sol" : "lua");
+}
 function toggleTema() {
-  const atual = document.documentElement.getAttribute("data-theme");
-  const novo = atual === "dark" ? "light" : "dark";
-  document.documentElement.setAttribute("data-theme", novo);
-  localStorage.setItem("tema", novo);
+  const novo = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+  try { localStorage.setItem(TEMA_KEY, novo); } catch {}
+  aplicarTema(novo);
   if (estado.data) render();
 }
+aplicarTema(lerTema());
 
 /* ---------- período ---------- */
 // data local (Brasil), não UTC: depois das 21h o UTC já é o dia seguinte
 const isoDate = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+const dataBR = (iso) => iso.split("-").reverse().join("/");
+const dataCurta = (iso) => iso.slice(8, 10) + "/" + iso.slice(5, 7);
 function periodoAtual() {
   const preset = $(".chip.ativo").dataset.preset;
   const hoje = new Date();
@@ -103,43 +130,53 @@ function iniciais(nome) {
   const p = nome.trim().split(/\s+/);
   return ((p[0]?.[0] || "") + (p.length > 1 ? p[p.length - 1][0] : "")).toUpperCase();
 }
-function corDe(i) { return PALETA[i % PALETA.length]; }
+const avatar = (nome, extra = "") => `<span class="av ${extra}">${iniciais(nome)}</span>`;
+const nomeCurto = (nome) => {
+  const p = nome.trim().split(/\s+/);
+  return p.length > 2 ? `${p[0]} ${p[p.length - 1]}` : nome.trim();
+};
 
-function countUp(el, alvo, { dur = 900, dec = 0, pre = "", suf = "" } = {}) {
-  const t0 = performance.now();
-  const passo = (t) => {
-    const p = Math.min(1, (t - t0) / dur);
-    const e = 1 - Math.pow(1 - p, 3);
-    const v = alvo * e;
-    el.textContent = pre + v.toLocaleString("pt-BR", { minimumFractionDigits: dec, maximumFractionDigits: dec }) + suf;
-    if (p < 1) requestAnimationFrame(passo);
-  };
-  requestAnimationFrame(passo);
+// Card de número (padrão da referência): ícone, título, apoio e o número embaixo.
+function statCard({ ico: i, titulo, sub = "", valor, unid = "", extra = "", cls = "", go = "", cu = true, money = false }) {
+  return `<div class="card stat ${cls}">
+    <div class="stat-top"><span class="ico-c">${ico(i)}</span>${go ? `<button class="ic-go" data-go="${go}" title="Abrir" aria-label="Abrir">${ico("seta")}</button>` : ""}</div>
+    <div class="stat-tit">${titulo}</div>
+    ${sub ? `<div class="stat-sub">${sub}</div>` : ""}
+    <div class="stat-base">
+      <div class="stat-val"><b ${cu && typeof valor === "number" ? `data-cu="${valor}" data-money="${money ? 1 : 0}"` : ""}>${typeof valor === "number" ? (money ? brlK(valor) : num(valor)) : valor}</b>${unid ? `<small>${unid}</small>` : ""}</div>
+      ${extra}
+    </div>
+  </div>`;
+}
+
+// Mini-gráfico de pontos (até 5): quantos de N, como os pontinhos da referência.
+const pontos = (qtd, total = 5) => `<span class="pontos">${Array.from({ length: total }, (_, i) => `<i class="${i < qtd ? "on" : ""}"></i>`).join("")}</span>`;
+// Mini barras verticais (proporção de uma parte no todo).
+function miniBarras(vals) {
+  const max = Math.max(1, ...vals);
+  return `<span class="mbar">${vals.map((v) => `<i style="height:${Math.max(8, (v / max) * 100)}%"></i>`).join("")}</span>`;
 }
 
 /* radar hexagonal */
-function radarSVG(dims, cor) {
+function radarSVG(dims) {
   const cx = 150, cy = 106, R = 80, N = DIMS.length;
   const ang = (i) => (Math.PI * 2 * i) / N - Math.PI / 2;
   const pt = (i, r) => [cx + Math.cos(ang(i)) * r, cy + Math.sin(ang(i)) * r];
   let g = "";
-  // anéis
   for (const ring of [0.25, 0.5, 0.75, 1]) {
     const pts = DIMS.map((_, i) => pt(i, R * ring).map((n) => n.toFixed(1)).join(",")).join(" ");
     g += `<polygon points="${pts}" fill="none" stroke="var(--line)" stroke-width="1"/>`;
   }
-  // eixos + rótulos
   DIMS.forEach((d, i) => {
     const [x, y] = pt(i, R);
     g += `<line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--line)" stroke-width="1"/>`;
     const [lx, ly] = pt(i, R + 16);
     const anchor = Math.abs(lx - cx) < 6 ? "middle" : lx > cx ? "start" : "end";
-    g += `<text x="${lx.toFixed(1)}" y="${(ly + 3).toFixed(1)}" text-anchor="${anchor}" font-size="10.5" font-weight="700" fill="var(--txt-dim)" font-family="Manrope,sans-serif">${d.short}</text>`;
+    g += `<text x="${lx.toFixed(1)}" y="${(ly + 3).toFixed(1)}" text-anchor="${anchor}" font-size="10.5" font-weight="500" fill="var(--txt-dim)" font-family="Inter Tight,sans-serif">${d.short}</text>`;
   });
-  // polígono do corretor
   const poly = DIMS.map((d, i) => pt(i, R * Math.max(0.04, dims[d.key] / 100)).map((n) => n.toFixed(1)).join(",")).join(" ");
-  g += `<polygon points="${poly}" fill="${cor}33" stroke="${cor}" stroke-width="2.5" stroke-linejoin="round"/>`;
-  DIMS.forEach((d, i) => { const [x, y] = pt(i, R * Math.max(0.04, dims[d.key] / 100)); g += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.2" fill="${cor}"/>`; });
+  g += `<polygon points="${poly}" fill="var(--accent-wash)" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>`;
+  DIMS.forEach((d, i) => { const [x, y] = pt(i, R * Math.max(0.04, dims[d.key] / 100)); g += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4" fill="var(--accent)" stroke="var(--card)" stroke-width="2"/>`; });
   return `<svg class="radar-svg" viewBox="0 0 300 214" xmlns="http://www.w3.org/2000/svg">${g}</svg>`;
 }
 
@@ -147,20 +184,24 @@ function radarSVG(dims, cor) {
 async function carregar({ soft = false } = {}) {
   const { inicio, fim } = periodoAtual();
   if (!inicio || !fim) return;
-  if (!soft) $("#conteudo").innerHTML = `<div class="carregando"><div class="loader"></div><p>Consultando o Supremo CRM…<br><small>Períodos longos podem levar ~1 min na 1ª vez.</small></p></div>`;
+  if (!soft) {
+    $("#conteudo").innerHTML = `<div class="carregando"><div class="loader"></div><p>Consultando o Supremo CRM…<br><small>Períodos longos podem levar ~1 min na 1ª vez.</small></p></div>`;
+    $("#bento").innerHTML = ""; $("#heroNum").innerHTML = ""; $("#escuro").classList.add("oculto");
+  }
   try {
     const r = await fetch(`/api/ranking?inicio=${inicio}&fim=${fim}`);
     const data = await r.json();
     if (!r.ok) throw new Error(data.detalhe || data.erro || "Falha");
     estado.data = data;
     render();
-    $("#rodapeInfo").textContent = `Período ${data.periodo.inicio} a ${data.periodo.fim} · atualizado ${new Date(data.geradoEm).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
+    const hora = new Date(data.geradoEm).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    $("#atualizadoEm").textContent = `${hora} · ${dataCurta(data.periodo.inicio)} a ${dataCurta(data.periodo.fim)}`;
+    $("#rodapeInfo").textContent = `Dados do Supremo CRM · período ${dataBR(data.periodo.inicio)} a ${dataBR(data.periodo.fim)} · atualizado às ${hora}`;
   } catch (e) {
-    if (!soft) $("#conteudo").innerHTML = `<div class="erro"><b>Não consegui carregar.</b><br>${e.message}</div>`;
+    if (!soft) $("#conteudo").innerHTML = `<div class="erro"><b>Não consegui carregar.</b><br>${esc(e.message)}</div>`;
   }
 }
 
-/* ---------- render ---------- */
 /* ---------- equipes ---------- */
 // A API do Supremo não tem equipe/gerente: vêm do equipes.json do servidor.
 function equipeAtual() {
@@ -186,313 +227,235 @@ function renderSeletorEquipe() {
   sel.value = estado.equipe;
 }
 
+/* ---------- render ---------- */
+const TITULOS = { ranking: "Ranking dos corretores", funil: "Funil de vendas", perfil: "Perfil comportamental", metodo: "Como o score funciona" };
+
 function render() {
   const d = estado.data;
   renderSeletorEquipe();
   // Score é sempre relativo à imobiliária inteira (não muda ao filtrar a equipe).
   const perfis = calcularPerfis(d.corretores).filter((p) => naEquipe(p.c.nome));
   document.querySelectorAll(".view-tab").forEach((t) => t.classList.toggle("ativo", t.dataset.view === estado.view));
-  if (estado.view === "metodo") return renderMetodo(perfis);
-  if (estado.view === "perfil") return renderPerfil(perfis);
-  if (estado.view === "funil") return renderFunil(d);
-  renderRanking(d, perfis);
+  $("#titulo").textContent = TITULOS[estado.view];
+  $("#filtrosExtra").innerHTML = "";
+  $("#conteudo").innerHTML = "";
+  $("#escuroIn").innerHTML = "";
+  if (estado.view === "metodo") renderMetodo(perfis);
+  else if (estado.view === "perfil") renderPerfil(perfis);
+  else if (estado.view === "funil") renderFunil(d);
+  else renderRanking(d, perfis);
+  $("#escuro").classList.toggle("oculto", !$("#escuroIn").children.length);
+  $("#bento").classList.toggle("oculto", !$("#bento").children.length);
+  animarNumeros();
 }
 
-function renderRanking(d, perfis) {
-  const byNome = Object.fromEntries(perfis.map((p, i) => [p.c.nome, { ...p, i }]));
-  const c = $("#conteudo");
-  c.innerHTML = "";
+// count-up dos números grandes
+function animarNumeros() {
+  document.querySelectorAll("[data-cu]").forEach((el) => {
+    const alvo = Number(el.dataset.cu);
+    const money = el.dataset.money === "1";
+    if (!alvo) return;
+    const final = money ? brlK(alvo) : num(alvo);
+    const t0 = performance.now();
+    const passo = (t) => {
+      const p = Math.min(1, (t - t0) / 900);
+      const v = alvo * (1 - Math.pow(1 - p, 3));
+      el.textContent = p < 1 ? (money ? brlK(v) : Math.round(v).toLocaleString("pt-BR")) : final;
+      if (p < 1) requestAnimationFrame(passo);
+    };
+    requestAnimationFrame(passo);
+    // garante o valor final mesmo se a aba estiver em segundo plano (rAF pausado)
+    setTimeout(() => { el.textContent = final; }, 1100);
+  });
+}
 
-  /* KPIs (da equipe, quando filtrada) */
+function heroNum({ rotulo, valor, nota }) {
+  $("#heroNum").innerHTML = `<div class="hero-num">
+    <div class="hero-rot">${rotulo}</div>
+    <div class="hero-linha"><b data-cu="${valor}">${num(valor)}</b><span>${nota}</span></div>
+  </div>`;
+}
+
+const secao = (titulo, sub, extra = "") => `<div class="secao-hd"><h2>${titulo}</h2>${sub ? `<span>${sub}</span>` : ""}${extra}</div>`;
+
+/* ---------- aba: ranking ---------- */
+function renderRanking(d, perfis) {
   const eq = equipeAtual();
   const alertas = (d.alertas || []).filter((a) => naEquipe(a.corretor));
   let r = d.resumo;
+  const cs = d.corretores.filter((x) => naEquipe(x.nome));
+  const propostas = cs.reduce((s, x) => s + (x.propostas || 0), 0);
   if (eq) {
-    const cs = d.corretores.filter((x) => naEquipe(x.nome));
     const leads = cs.reduce((s, x) => s + x.leads, 0), vendas = cs.reduce((s, x) => s + x.vendas, 0), vgv = cs.reduce((s, x) => s + x.vgv, 0);
-    const propostas = cs.reduce((s, x) => s + (x.propostas || 0), 0);
     r = {
-      leads, vendas, vgv, propostas, ticketMedio: vendas ? Math.round(vgv / vendas) : 0,
+      leads, vendas, vgv, ticketMedio: vendas ? Math.round(vgv / vendas) : 0,
       corretoresAtivos: cs.filter((x) => x.leads > 0).length,
       conversaoGeral: leads ? +(100 * vendas / leads).toFixed(1) : 0,
       parados15d: alertas.length,
     };
   }
-  const kpis = [
-    { rot: "Leads no período", ico: "👥", cor: "var(--c3)", val: r.leads, sub: `${r.corretoresAtivos} corretores ativos` },
-    { rot: "Propostas", ico: "📝", cor: "var(--c2)", val: r.propostas ?? d.corretores.reduce((s, x) => s + (x.propostas || 0), 0), sub: "leads que chegaram em proposta" },
-    { rot: "Vendas fechadas", ico: "🏆", cor: "var(--gold)", val: r.vendas, sub: `conversão ${r.conversaoGeral}%` },
-    { rot: "VGV vendido", ico: "💰", cor: "var(--c4)", val: r.vgv, money: true, sub: `ticket ${brlK(r.ticketMedio)}` },
-    { rot: "Parados +15 dias", ico: "🚨", cor: "var(--c5)", val: r.parados15d, sub: d.alertasProntos ? "precisam de ação" : "calculando…" },
-  ];
-  const kpiEl = document.createElement("section");
-  kpiEl.className = "kpis";
-  kpiEl.innerHTML = kpis.map((k, i) => `
-    <div class="kpi anim" style="--kc:${k.cor};animation-delay:${i * 60}ms">
-      <div class="rot"><em>${k.ico}</em>${k.rot}</div>
-      <div class="val" data-cu="${k.val}" data-money="${k.money ? 1 : 0}">0</div>
-      <div class="sub">${k.sub}</div>
+
+  heroNum({
+    rotulo: "leads recebidos no período",
+    valor: r.leads,
+    nota: `${plural(r.corretoresAtivos, "corretor ativo", "corretores ativos")}${eq ? `<br>${esc(eq.nome)}` : ""}`,
+  });
+
+  /* bento: pódio + 3 números */
+  const top = perfis.slice(0, 3);
+  const podio = top.map((p, i) => `<div class="card stat pod ${i === 0 ? "glass" : ""}">
+      <div class="stat-top"><span class="pod-pos">${i + 1}º</span><span class="pod-chip">${p.c.leads} leads</span></div>
+      <div class="stat-tit">${esc(nomeCurto(p.c.nome))}</div>
+      <div class="stat-sub">${plural(p.c.vendas, "venda", "vendas")} · ${plural(p.c.propostas || 0, "proposta", "propostas")} · conv. ${p.c.conversao}%</div>
+      <div class="stat-base"><div class="stat-val"><b data-cu="${p.score}">${p.score}</b><small>pts</small></div>${pontos(Math.round(p.score / 20))}</div>
     </div>`).join("");
-  c.appendChild(kpiEl);
+  const graves = alertas.filter((a) => a.diasParado > 30).length;
+  $("#bento").innerHTML = podio +
+    statCard({ ico: "proposta", titulo: "Propostas", sub: "leads do período que chegaram em proposta", valor: propostas, unid: "propostas" }) +
+    statCard({
+      ico: "trofeu", titulo: "Vendas fechadas", sub: `conversão ${r.conversaoGeral}% · VGV ${brlK(r.vgv)} · ticket ${brlK(r.ticketMedio)}`,
+      valor: r.vendas, unid: r.vendas === 1 ? "venda" : "vendas",
+    }) +
+    statCard({
+      ico: "alerta", titulo: "Parados +15 dias", sub: d.alertasProntos ? `${num(graves)} há mais de 30 dias` : "calculando…",
+      valor: r.parados15d, unid: "leads", go: "funil", cls: r.parados15d ? "alerta" : "",
+      extra: miniBarras([alertas.length - graves, graves]),
+    });
 
-  /* Pódio */
-  if (perfis.length) {
-    const top = perfis.slice(0, 3);
-    const ordemVisual = [1, 0, 2].filter((idx) => top[idx]); // 2º, 1º, 3º
-    const medals = ["🥇", "🥈", "🥉"];
-    const sec = document.createElement("section");
-    sec.className = "secao";
-    sec.innerHTML = `<div class="secao-hd"><h2>Pódio do período</h2><span>score = mix de vendas, propostas, conversão e consistência</span></div>`;
-    const grid = document.createElement("div");
-    grid.className = "podio";
-    grid.innerHTML = ordemVisual.map((idx) => {
-      const p = top[idx], cor = corDe(idx);
-      return `<div class="pod-card p${idx + 1} anim" style="animation-delay:${idx * 90}ms">
-        <div class="pod-medal">${medals[idx]}</div>
-        <div class="pod-av" style="background:linear-gradient(150deg,${cor},${cor}bb)">${iniciais(p.c.nome)}</div>
-        <div class="pod-nome">${p.c.nome.trim()}</div>
-        <div class="pod-score" data-cu="${p.score}">0<small> pts</small></div>
-        <div class="pod-stats">
-          <div><b>${p.c.vendas}</b><span>vendas</span></div>
-          <div><b>${p.c.propostas || 0}</b><span>propostas</span></div>
-          <div><b>${p.c.conversao}%</b><span>conv.</span></div>
-          <div><b>${p.c.tempoQualifHoras == null ? "n/d" : p.c.tempoQualifHoras + "h"}</b><span>1º contato</span></div>
-        </div>
-      </div>`;
-    }).join("");
-    sec.appendChild(grid);
-    c.appendChild(sec);
-  }
-
-  /* Ranking completo */
-  const cols = [
-    { key: "score", lab: "Score" },
-    { key: "leads", lab: "Leads" },
-    { key: "contato", lab: "1º contato" },
-    { key: "propostas", lab: "Propostas" },
-    { key: "vendas", lab: "Vendas" },
-    { key: "vgv", lab: "VGV", hide: true },
-    { key: "conversao", lab: "Conversão" },
-    { key: "parados15d", lab: "Parados +15d" },
+  /* área escura: ranking completo + parados */
+  const ordens = [
+    { k: "score", lab: "Score" }, { k: "propostas", lab: "Propostas" }, { k: "vendas", lab: "Vendas" },
+    { k: "conversao", lab: "Conversão" }, { k: "leads", lab: "Leads" }, { k: "contato", lab: "1º contato" }, { k: "parados15d", lab: "Parados" },
   ];
   const valOrd = (p, key) => key === "score" ? p.score : key === "contato" ? (p.c.tempoQualifHoras == null ? 1e9 : p.c.tempoQualifHoras) : p.c[key] ?? 0;
   const asc = estado.ord === "contato" || estado.ord === "parados15d"; // menor é melhor
-  const ordenado = [...perfis].sort((a, b) => {
-    const x = valOrd(a, estado.ord), y = valOrd(b, estado.ord);
-    return asc ? x - y : y - x;
-  });
-  const maxScore = Math.max(1, ...perfis.map((p) => p.score));
+  const ordenado = [...perfis].sort((a, b) => { const x = valOrd(a, estado.ord), y = valOrd(b, estado.ord); return asc ? x - y : y - x; });
+  const posScore = Object.fromEntries(perfis.map((p, i) => [p.c.nome, i + 1]));
+  const nivel = (n) => (n >= 67 ? "alto" : n >= 34 ? "medio" : "baixo");
 
-  const sec2 = document.createElement("section");
-  sec2.className = "secao anim";
-  sec2.style.animationDelay = "120ms";
-  sec2.innerHTML = `<div class="secao-hd"><h2>Ranking completo</h2><span>${perfis.length} corretores · clique no cabeçalho pra reordenar</span></div>`;
-  const wrap = document.createElement("div");
-  wrap.className = "tabela-wrap";
-  const thead = `<thead><tr><th>Corretor</th>${cols.map((col) => `<th data-k="${col.key}" class="${col.key === estado.ord ? "ord" : ""} ${col.hide ? "hide-sm" : ""}">${col.lab}</th>`).join("")}</tr></thead>`;
-  const tbody = ordenado.map((p, i) => {
-    const cor = corDe(byNome[p.c.nome].i);
-    const lider = estado.ord === "score" && i === 0;
-    return `<tr class="${lider ? "lider" : ""}">
-      <td><div class="rk">
-        <span class="rk-pos ${i < 3 ? "m" : ""}">${i < 3 ? ["🥇", "🥈", "🥉"][i] : i + 1}</span>
-        <span class="rk-av" style="background:linear-gradient(150deg,${cor},${cor}bb)">${iniciais(p.c.nome)}</span>
-        <span><span class="rk-nome">${p.c.nome.trim()}</span><br><span class="rk-sub">${p.c.leads} leads · ${DIM_PROPOSTAS.disp(p.c)}</span></span>
-      </div></td>
-      <td><span class="score-cell">${p.score}</span><span class="mini-bar"><i style="width:${(p.score / maxScore) * 100}%"></i></span></td>
-      <td><span class="cell-num">${p.c.leads}</span></td>
-      <td><span class="cell-num">${p.c.tempoQualifHoras == null ? "n/d" : p.c.tempoQualifHoras + "h"}</span></td>
-      <td><span class="cell-num">${p.c.propostas || 0}</span></td>
-      <td><span class="cell-num">${p.c.vendas}</span></td>
-      <td class="hide-sm"><span class="cell-num">${brlK(p.c.vgv)}</span></td>
-      <td><span class="pill ${p.c.conversao >= 3 ? "g" : "n"}">${p.c.conversao}%</span></td>
-      <td>${p.c.parados15d ? `<span class="pill r">${p.c.parados15d}</span>` : `<span class="pill n">0</span>`}</td>
-    </tr>`;
-  }).join("");
-  wrap.innerHTML = `<table>${thead}<tbody>${tbody || `<tr><td colspan="9" class="vazio">Sem dados no período.</td></tr>`}</tbody></table>`;
-  wrap.querySelectorAll("th[data-k]").forEach((th) => th.addEventListener("click", () => { estado.ord = th.dataset.k; render(); }));
-  sec2.appendChild(wrap);
-  c.appendChild(sec2);
-
-  /* Alertas */
-  const sec4 = document.createElement("section");
-  sec4.className = "secao";
-  sec4.innerHTML = `<div class="secao-hd"><h2>🚨 Leads parados +15 dias</h2><span>ativos, sem movimentação há +15 dias · janela de ${d.alertaJanelaDias || 45} dias</span></div>`;
-  const box = document.createElement("div");
-  box.className = "alertas-box";
-  if (!d.alertasProntos) box.innerHTML = `<div class="vazio">⏳ Calculando varredura dos últimos ${d.alertaJanelaDias || 45} dias… recarrega em instantes.</div>`;
-  else if (!alertas.length) box.innerHTML = `<div class="vazio">🎉 Nenhum lead parado além de 15 dias.</div>`;
-  else box.innerHTML = alertas.slice(0, 12).map((a) => `
-    <div class="alerta-row">
-      <div class="alerta-dias"><b>${a.diasParado}</b><span>dias</span></div>
-      <div class="alerta-info">
-        <div class="l">${a.lead} ${a.telefone ? `<span class="alerta-tel">· ${a.telefone}</span>` : ""}</div>
-        <div class="m"><span class="tag-corr">${a.corretor.trim()}</span>${a.etapa ? " · " + a.etapa : ""}${a.situacao ? " · " + a.situacao : ""}</div>
+  const linhas = ordenado.map((p) => {
+    const pos = posScore[p.c.nome];
+    const barras = SCORE_DIMS.map((dm) => `<div class="rb"><span>${dm.label} · <b>${dm.disp(p.c).replace(/ (vendas|propostas|proposta|parados)$/, "")}</b></span><i><u class="${nivel(p.dims[dm.key])}" style="width:${Math.max(3, p.dims[dm.key])}%"></u></i></div>`).join("");
+    return `<div class="rk-row ${pos === 1 ? "lider" : ""}">
+      <div class="rk-pos">${pos}º</div>
+      <div class="rk-who"><b>${esc(p.c.nome.trim())}</b><span>${plural(p.c.leads, "lead", "leads")} · 1º contato ${p.c.tempoQualifHoras == null ? "n/d" : p.c.tempoQualifHoras + "h"}</span><i class="rk-track"><u style="width:${p.score}%"></u></i></div>
+      <div class="rk-score">${p.score}<small>pts</small></div>
+      <div class="rk-bars">${barras}</div>
+      <div class="rk-chips">
+        <span class="dk-chip" title="VGV vendido">${ico("moeda")}${brlK(p.c.vgv)}</span>
+        <span class="dk-chip ${p.c.parados15d ? "ruim" : ""}" title="Leads parados +15 dias">${ico("alerta")}${p.c.parados15d}</span>
       </div>
-    </div>`).join("");
-  sec4.appendChild(box);
-  c.appendChild(sec4);
-
-  /* count-up (números-herói dos KPIs e do pódio) */
-  c.querySelectorAll("[data-cu]").forEach((el) => {
-    const alvo = Number(el.dataset.cu);
-    const money = el.dataset.money === "1";
-    const small = el.querySelector("small"); // ex: " pts"
-    const t0 = performance.now();
-    const passo = (t) => {
-      const p = Math.min(1, (t - t0) / 1000);
-      const e = 1 - Math.pow(1 - p, 3);
-      const v = alvo * e;
-      el.textContent = money ? brlK(v) : Math.round(v).toLocaleString("pt-BR");
-      if (small) el.appendChild(small);
-      if (p < 1) requestAnimationFrame(passo);
-    };
-    requestAnimationFrame(passo);
-  });
-}
-
-/* ---------- render: aba "perfil comportamental" (todos os corretores) ---------- */
-function radarCardHTML(p, i) {
-  const cor = corDe(i);
-  return `<div class="radar-card anim" style="animation-delay:${Math.min(i, 11) * 45}ms">
-    <div class="radar-hd">
-      <span class="rk-av" style="background:linear-gradient(150deg,${cor},${cor}bb)">${iniciais(p.c.nome)}</span>
-      <div><div class="n">${p.c.nome.trim()}</div><div class="s">score ${p.score} · ${p.c.vendas} vendas · 1º contato ${p.c.tempoQualifHoras == null ? "n/d" : p.c.tempoQualifHoras + "h"}</div></div>
-    </div>
-    ${radarSVG(p.dims, cor)}
-    <div class="radar-legend">
-      <div class="up"><h4>▲ Fortes</h4><p>${p.fortes.map((f) => `<b>${f.label}</b> ${f.v}`).join("<br>")}</p></div>
-      <div class="down"><h4>▼ A melhorar</h4><p>${p.melhorar.map((f) => `<b>${f.label}</b> ${f.v}`).join("<br>")}</p></div>
-    </div>
-  </div>`;
-}
-
-function renderPerfil(perfis) {
-  const c = $("#conteudo");
-  c.innerHTML = "";
-  const sec = document.createElement("section");
-  sec.innerHTML = `<div class="secao-hd" style="margin-top:6px"><h2>Perfil comportamental</h2><span>${perfis.length} corretores · 6 dimensões, normalizadas entre os corretores do período · Volume, Movimentação e 1º contato ficam só aqui, fora do score</span></div>`;
-  const grid = document.createElement("div");
-  grid.className = "radar-grid";
-  grid.innerHTML = perfis.length ? perfis.map((p, i) => radarCardHTML(p, i)).join("") : `<div class="vazio">Sem corretores com leads no período.</div>`;
-  sec.appendChild(grid);
-  c.appendChild(sec);
-}
-
-/* ---------- render: aba "como o score é calculado" ---------- */
-function renderMetodo(perfis) {
-  const c = $("#conteudo");
-  c.innerHTML = "";
-  const ordPeso = [...SCORE_DIMS].sort((a, b) => (PESOS[b.key] || 0) - (PESOS[a.key] || 0));
-  const maxPeso = Math.max(...Object.values(PESOS)) * 100;
-
-  // 1) intro
-  const intro = document.createElement("section");
-  intro.className = "anim";
-  intro.innerHTML = `<div class="card">
-    <div class="big-note">O <em>Score de Performance</em> é uma nota de <em>0 a 100</em> que resume ${SCORE_DIMS.length} métricas do corretor num número só.</div>
-    <p style="margin-top:14px">É <b>relativo ao grupo do período</b>: cada corretor é comparado com os outros corretores da imobiliária que tiveram leads naquele intervalo (mesmo com uma equipe filtrada). Em cada métrica, o melhor do grupo vira 100, o pior vira 0, e o resto fica proporcional no meio. Depois somamos essas notas com pesos diferentes.</p>
-  </div>`;
-  c.appendChild(intro);
-
-  // 2) dimensões e pesos
-  const dims = document.createElement("section");
-  dims.className = "secao anim";
-  dims.style.animationDelay = "70ms";
-  dims.innerHTML = `<div class="secao-hd"><h2>As ${SCORE_DIMS.length} métricas e seus pesos</h2><span>somam 100%</span></div>`;
-  const cardD = document.createElement("div");
-  cardD.className = "card";
-  cardD.innerHTML = ordPeso.map((d, i) => {
-    const peso = Math.round((PESOS[d.key] || 0) * 100);
-    return `<div class="dim-row">
-      <span class="dim-dot" style="background:${PALETA[i % PALETA.length]}"></span>
-      <span class="dim-nome">${d.label}</span>
-      <span class="dim-desc">${DIM_DESC[d.key]}</span>
-      <span class="peso-track"><i style="width:${peso / maxPeso * 100}%"></i></span>
-      <span class="dim-peso">${peso}%</span>
     </div>`;
   }).join("");
-  dims.appendChild(cardD);
-  c.appendChild(dims);
 
-  // 3) exemplo real com o líder
-  if (perfis.length) {
-    const lider = perfis[0];
-    const linhas = SCORE_DIMS.map((d) => ({
-      label: d.label, valor: d.disp(lider.c),
-      nota: lider.dims[d.key], peso: Math.round((PESOS[d.key] || 0) * 100),
-      contrib: lider.dims[d.key] * (PESOS[d.key] || 0),
-    })).sort((a, b) => b.contrib - a.contrib);
-    const total = linhas.reduce((s, l) => s + l.contrib, 0);
-
-    const ex = document.createElement("section");
-    ex.className = "secao anim";
-    ex.style.animationDelay = "140ms";
-    ex.innerHTML = `<div class="secao-hd"><h2>Exemplo real, ${lider.c.nome.trim()}</h2><span>líder do período, calculado ao vivo</span></div>`;
-    const wrap = document.createElement("div");
-    wrap.className = "tabela-wrap";
-    wrap.innerHTML = `<table>
-      <thead><tr><th>Dimensão</th><th>Valor real</th><th>Nota 0 a 100</th><th>Peso</th><th>Contribui</th></tr></thead>
-      <tbody>
-        ${linhas.map((l) => `<tr>
-          <td style="font-weight:700">${l.label}</td>
-          <td class="cell-num">${l.valor}</td>
-          <td class="cell-num">${l.nota}</td>
-          <td class="cell-num">${l.peso}%</td>
-          <td class="cell-num">${l.contrib.toFixed(1)}</td>
-        </tr>`).join("")}
-        <tr class="exemplo-total">
-          <td>Score final</td><td></td><td></td><td></td><td>${Math.round(total)}</td>
-        </tr>
-      </tbody></table>`;
-    ex.appendChild(wrap);
-    c.appendChild(ex);
-  }
-
-  // 4) pontos importantes
-  const cav = document.createElement("section");
-  cav.className = "secao anim";
-  cav.style.animationDelay = "200ms";
-  cav.innerHTML = `<div class="secao-hd"><h2>Pontos importantes</h2></div>`;
-  const cardC = document.createElement("div");
-  cardC.className = "card";
-  cardC.innerHTML = `<ul class="caveats">
-    <li><b>É relativo, não absoluto.</b> O mesmo corretor pode ter score diferente se você muda o período ou o conjunto de colegas comparados.</li>
-    <li><b>Consistência</b> é medida por lead: um corretor com muitos leads e alguns parados pode pontuar melhor que outro com poucos leads e vários parados.</li>
-    <li><b>Volume, Movimentação e 1º contato não entram no score.</b> O pré-atendimento é feito pela recepção e o corretor já recebe o lead qualificado: quantos leads ele recebe e o tempo da captura até a qualificação não dependem dele. Os três continuam no perfil comportamental e na tabela, como informação (dá pra ver, por exemplo, quem recebe muito e converte pouco).</li>
-    <li><b>Propostas</b> tem peso alto porque acontece com mais frequência que a venda e converte bem: mostra quem está construindo resultado antes do fechamento. Conta os leads recebidos no período que estão em Proposta ou já viraram venda.</li>
-    <li><b>Os pesos são ajustáveis.</b> Se para a Lion vale mais proposta, ou punir mais os leads parados, é só recalibrar.</li>
-  </ul>
-  </div>`;
-  cav.appendChild(cardC);
-  c.appendChild(cav);
-
-  // 5) funil
-  const fun = document.createElement("section");
-  fun.className = "secao anim";
-  fun.style.animationDelay = "260ms";
-  fun.innerHTML = `<div class="secao-hd"><h2>Como o funil é calculado</h2></div>`;
-  const cardF = document.createElement("div");
-  cardF.className = "card";
-  cardF.innerHTML = `<ul class="caveats">
-    <li><b>O funil começa em Qualificado.</b> A etapa Lead → Qualificado é do pré-atendimento, então todo lead que chegou ao corretor conta como Qualificado.</li>
-    <li><b>As etapas vêm da situação do lead no Supremo:</b> Agendamento ou Análise de crédito → Agendamento/Crédito; Visita; Proposta; Venda (lead vendido).</li>
-    <li><b>Etapa pulada conta como passada.</b> Um lead que foi de Qualificado direto pra Visita conta também em Agendamento/Crédito. Lead perdido conta até a situação em que estava quando foi perdido.</li>
-    <li><b>Taxa de passagem</b> = quantos chegaram na etapa ÷ quantos chegaram na etapa anterior. O <b>gargalo</b> é a passagem em que o corretor mais fica abaixo da equipe (só conta quando ele tem pelo menos ${MIN_GARGALO} leads na etapa anterior).</li>
-    <li><b>Funil = leads recebidos no período.</b> Mostra até onde chegaram os leads capturados no intervalo, por isso a Venda do funil pode ser menor que "Vendas fechadas" (que conta pela data da venda, inclusive leads de meses anteriores). Leads muito recentes ainda não tiveram tempo de avançar.</li>
-    <li><b>A API só mostra a situação atual,</b> sem o histórico. Se o corretor não atualiza a situação no Supremo, o lead fica parado em Qualificado no funil.</li>
-  </ul>`;
-  fun.appendChild(cardF);
-  c.appendChild(fun);
+  const escuro = $("#escuroIn");
+  escuro.innerHTML = `<section>
+      ${secao("Ranking completo", `${perfis.length} corretores · cada barra mostra a nota da métrica (0 a 100) e o valor real`,
+        `<div class="pills" id="ordem">${ordens.map((o) => `<button class="pill-b ${o.k === estado.ord ? "ativo" : ""}" data-k="${o.k}">${o.lab}</button>`).join("")}</div>`)}
+      <div class="rk-lista">${linhas || `<div class="vazio">Sem dados no período.</div>`}</div>
+    </section>
+    <section class="secao">${secao("Leads parados há mais de 15 dias", `ativos, sem movimentação · capturados nos últimos ${d.alertaJanelaDias || 45} dias`)}
+      ${listaParadosHTML(d, alertas.slice(0, 12), { mostrarCorretor: true })}
+      ${alertas.length > 12 ? `<button class="btn-mais" data-go="funil">Ver todos no Funil (${num(alertas.length)})</button>` : ""}
+    </section>`;
+  escuro.querySelector("#ordem").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-k]"); if (!b) return;
+    estado.ord = b.dataset.k; render();
+  });
 }
 
-/* ---------- render: aba "funil" ---------- */
+function listaParadosHTML(d, lista, { mostrarCorretor }) {
+  if (!d.alertasProntos) return `<div class="dk-card vazio">Calculando varredura… recarrega em instantes.</div>`;
+  if (!lista.length) return `<div class="dk-card vazio">Nenhum lead parado além de 15 dias.</div>`;
+  return `<div class="parados-grid">${lista.map((a) => `
+    <div class="parado ${a.diasParado > 30 ? "grave" : ""}">
+      <div class="pd-dias"><b>${a.diasParado}</b><span>dias</span></div>
+      <div class="pd-info">
+        <div class="l">${esc(a.lead)}${a.telefone ? ` <span>· ${esc(a.telefone)}</span>` : ""}</div>
+        <div class="m"><span class="dk-tag">${esc(a.etapaFunil || "Qualificado")}</span>${mostrarCorretor ? `<span class="dk-tag sutil">${esc(nomeCurto(a.corretor))}</span>` : ""}${a.situacao ? `<span class="sit">${esc(a.situacao.trim())}</span>` : ""}</div>
+      </div>
+    </div>`).join("")}</div>`;
+}
+
+/* ---------- aba: perfil comportamental ---------- */
+function renderPerfil(perfis) {
+  heroNum({ rotulo: "corretores com leads no período", valor: perfis.length, nota: "6 dimensões, comparadas<br>entre os corretores do período" });
+  $("#bento").innerHTML = DIMS.map((dm) => `<div class="card mini-dim ${PESOS[dm.key] ? "" : "fora"}">
+      <span class="ico-c">${ico(DIM_ICO[dm.key])}</span>
+      <div><b>${dm.label}</b><span>${DIM_DESC[dm.key]}</span></div>
+      <em>${PESOS[dm.key] ? `${Math.round(PESOS[dm.key] * 100)}% do score` : "fora do score"}</em>
+    </div>`).join("");
+  $("#conteudo").innerHTML = `<section class="secao">${secao("Um radar por corretor", "quanto mais longe do centro, melhor naquela dimensão · Volume, Movimentação e 1º contato não entram no score")}
+    <div class="radar-grid">${perfis.length ? perfis.map((p, i) => `<div class="card radar-card anim" style="animation-delay:${Math.min(i, 11) * 40}ms">
+      <div class="radar-hd">${avatar(p.c.nome)}<div><div class="n">${esc(p.c.nome.trim())}</div><div class="s">score ${p.score} · ${plural(p.c.vendas, "venda", "vendas")} · ${plural(p.c.propostas || 0, "proposta", "propostas")}</div></div><span class="radar-pos">${i + 1}º</span></div>
+      ${radarSVG(p.dims)}
+      <div class="radar-legend">
+        <div class="up"><h4>Fortes</h4><p>${p.fortes.map((f) => `<b>${f.label}</b> ${f.v}`).join("<br>")}</p></div>
+        <div class="down"><h4>A melhorar</h4><p>${p.melhorar.map((f) => `<b>${f.label}</b> ${f.v}`).join("<br>")}</p></div>
+      </div>
+    </div>`).join("") : `<div class="vazio">Sem corretores com leads no período.</div>`}</div></section>`;
+}
+
+/* ---------- aba: como o score funciona ---------- */
+function renderMetodo(perfis) {
+  heroNum({ rotulo: "métricas formam o score", valor: SCORE_DIMS.length, nota: "nota de 0 a 100,<br>relativa aos colegas do período" });
+  const ordPeso = [...SCORE_DIMS].sort((a, b) => (PESOS[b.key] || 0) - (PESOS[a.key] || 0));
+  $("#bento").innerHTML = `<div class="bento-4">${ordPeso.map((dm) => statCard({
+    ico: DIM_ICO[dm.key], titulo: dm.label, sub: DIM_DESC[dm.key], valor: `${Math.round(PESOS[dm.key] * 100)}%`, unid: "do score", cu: false,
+    extra: pontos(Math.round(PESOS[dm.key] * 100 / 7), 5),
+  })).join("")}</div>`;
+
+  let exemplo = "";
+  if (perfis.length) {
+    const lider = perfis[0];
+    const linhas = SCORE_DIMS.map((dm) => ({
+      label: dm.label, valor: dm.disp(lider.c), nota: lider.dims[dm.key], peso: Math.round((PESOS[dm.key] || 0) * 100),
+      contrib: lider.dims[dm.key] * (PESOS[dm.key] || 0),
+    })).sort((a, b) => b.contrib - a.contrib);
+    const total = linhas.reduce((s, l) => s + l.contrib, 0);
+    exemplo = `<section class="secao">${secao(`Exemplo real: ${esc(lider.c.nome.trim())}`, "líder do período, calculado ao vivo")}
+      <div class="card ex-card">${linhas.map((l) => `<div class="ex-row">
+          <span class="ex-nome">${l.label}</span><span class="ex-val">${l.valor}</span>
+          <span class="ex-bar"><i style="width:${l.nota}%"></i></span><span class="ex-nota">nota ${l.nota}</span>
+          <span class="ex-peso">× ${l.peso}%</span><span class="ex-contrib">${l.contrib.toFixed(1)}</span>
+        </div>`).join("")}
+        <div class="ex-row total"><span class="ex-nome">Score final</span><span></span><span></span><span></span><span></span><span class="ex-contrib">${Math.round(total)}</span></div>
+      </div></section>`;
+  }
+
+  $("#conteudo").innerHTML = `
+    <section class="secao"><div class="card intro"><p class="big-note">Em cada métrica, o melhor corretor do período vira <em>100</em>, o pior vira <em>0</em> e os outros ficam proporcionais no meio. Depois as notas são somadas com os pesos ao lado.</p>
+      <p>A comparação é sempre com a imobiliária inteira, mesmo com uma equipe filtrada.</p></div></section>
+    ${exemplo}
+    <section class="secao metodo-grid">
+      <div class="card"><h3>Pontos importantes</h3><ul class="caveats">
+        <li><b>É relativo, não absoluto.</b> O mesmo corretor pode ter score diferente se você muda o período ou o conjunto de colegas comparados.</li>
+        <li><b>Consistência</b> é medida por lead: um corretor com muitos leads e alguns parados pode pontuar melhor que outro com poucos leads e vários parados.</li>
+        <li><b>Volume, Movimentação e 1º contato não entram no score.</b> O pré-atendimento é feito pela recepção e o corretor já recebe o lead qualificado: quantos leads ele recebe e o tempo da captura até a qualificação não dependem dele. Os três continuam no perfil comportamental e no ranking, como informação.</li>
+        <li><b>Propostas</b> tem peso alto porque acontece com mais frequência que a venda e converte bem: mostra quem está construindo resultado antes do fechamento.</li>
+        <li><b>Os pesos são ajustáveis.</b> Se para a Lion vale mais proposta, ou punir mais os leads parados, é só recalibrar.</li>
+      </ul></div>
+      <div class="card"><h3>Como o funil é calculado</h3><ul class="caveats">
+        <li><b>Começa em Qualificado.</b> A etapa Lead → Qualificado é do pré-atendimento, então todo lead que chegou ao corretor conta como Qualificado.</li>
+        <li><b>As etapas vêm da situação do lead no Supremo:</b> Agendamento ou Análise de crédito → Agendamento/Crédito; Visita; Proposta; Venda (lead vendido).</li>
+        <li><b>Etapa pulada conta como passada.</b> Um lead que foi de Qualificado direto pra Visita conta também em Agendamento/Crédito. Lead perdido conta até a situação em que estava quando foi perdido.</li>
+        <li><b>Taxa de passagem</b> = quantos chegaram na etapa ÷ quantos chegaram na anterior. O <b>gargalo</b> é a passagem em que o corretor mais fica abaixo da equipe (só conta com pelo menos ${MIN_GARGALO} leads na etapa anterior).</li>
+        <li><b>Funil = leads recebidos no período.</b> Por isso a Venda do funil pode ser menor que "Vendas fechadas", que conta pela data da venda, inclusive leads de meses anteriores.</li>
+        <li><b>A API só mostra a situação atual,</b> sem o histórico. Se o corretor não atualiza a situação no Supremo, o lead fica parado em Qualificado no funil.</li>
+      </ul></div>
+    </section>`;
+}
+
+/* ---------- aba: funil ---------- */
 const MIN_GARGALO = 3; // mínimo de leads na etapa anterior pra uma passagem valer como gargalo
 const ETAPAS_PADRAO = ["Qualificado", "Agendamento/Crédito", "Visita", "Proposta", "Venda"];
+const ETAPA_ICO = ["check", "agenda", "casa", "proposta", "chave"];
+const CURTO = ["Qualif.", "Agend./Créd.", "Visita", "Proposta", "Venda"];
 const somaFunil = (lista) => lista.reduce((acc, f) => acc.map((v, i) => v + (f[i] || 0)), ETAPAS_PADRAO.map(() => 0));
 // taxa de passagem i-1 -> i (null quando não há base)
 const taxa = (f, i) => (f[i - 1] ? (100 * f[i]) / f[i - 1] : null);
 const pct = (v) => (v == null ? "—" : `${v.toLocaleString("pt-BR", { maximumFractionDigits: v < 10 ? 1 : 0 })}%`);
+const pp = (v) => `${v > 0 ? "+" : ""}${v.toLocaleString("pt-BR", { maximumFractionDigits: Math.abs(v) < 10 ? 1 : 0 })} p.p.`;
 
 // Passagem em que o corretor mais fica abaixo da referência (equipe).
 function gargalo(f, ref) {
@@ -505,68 +468,165 @@ function gargalo(f, ref) {
   }
   return pior;
 }
+// Passagem com a menor taxa (quando não há referência pra comparar).
+function piorPassagem(f) {
+  let pior = null;
+  for (let i = 1; i < f.length; i++) { const t = taxa(f, i); if (t != null && f[i - 1] >= MIN_GARGALO && (!pior || t < pior.t)) pior = { i, t }; }
+  return pior;
+}
 
-const CURTO = ["Qualif.", "Agend./Créd.", "Visita", "Proposta", "Venda"];
-const pp = (v) => `${v > 0 ? "+" : ""}${v.toLocaleString("pt-BR", { maximumFractionDigits: Math.abs(v) < 10 ? 1 : 0 })} p.p.`;
-const avatar = (nome, i, cls = "rk-av") => `<span class="${cls}" style="background:linear-gradient(150deg,${corDe(i)},${corDe(i)}bb)">${iniciais(nome)}</span>`;
+function renderFunil(d) {
+  const etapas = d.etapasFunil || ETAPAS_PADRAO;
+  const grupo = nomeGrupo();
+  const eq = equipeAtual();
+  const refNome = eq ? "equipe" : "imob.";
+  const corretores = d.corretores.filter((x) => naEquipe(x.nome) && x.funil && x.leads > 0);
+  const fGrupo = somaFunil(corretores.map((x) => x.funil));
+  const fImob = somaFunil(d.corretores.filter((x) => x.funil).map((x) => x.funil));
+  if (estado.corretorSel && !corretores.some((x) => x.nome === estado.corretorSel)) estado.corretorSel = "";
+  const sel = corretores.find((x) => x.nome === estado.corretorSel);
 
-// Funil em degraus: cada etapa é um bloco com o número grande; entre eles, a taxa de
-// passagem (e a da referência). Uma cor só (é uma sequência, não categorias).
-function funilFluxoHTML({ titulo, sub, av, f, ref, refNome, etapas }) {
-  const base = Math.max(1, f[0]);
-  const g = ref ? gargalo(f, ref) : null;
-  let partes = "";
-  etapas.forEach((nome, i) => {
-    if (i) {
-      const t = taxa(f, i), tr = ref ? taxa(ref, i) : null;
-      const fraco = f[i - 1] < MIN_GARGALO;
-      let cmp = "";
-      if (ref) {
-        const dir = t == null || tr == null ? "n" : t >= tr ? "g" : "r";
-        cmp = `<div class="fx-cmp ${fraco ? "n" : dir}">${dir === "g" && !fraco ? "▲" : dir === "r" && !fraco ? "▼" : "·"} ${refNome} ${pct(tr)}</div>`;
-      }
-      partes += `<div class="fx-link ${g && g.i === i ? "gargalo" : ""}">
-        <svg class="fx-seta" viewBox="0 0 40 12" aria-hidden="true"><path d="M0 6h34M29 1l6 5-6 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <div class="fx-rate">${pct(t)}</div><small>${g && g.i === i ? "gargalo" : "passaram"}</small>${cmp}
-      </div>`;
-    }
-    const share = (100 * f[i]) / base;
-    partes += `<div class="fx-stage" style="--a:${0.35 + 0.65 * (1 - i / (etapas.length - 1))}">
-      <div class="fx-lab">${nome}</div>
-      <div class="fx-num">${num(f[i])}</div>
-      <div class="fx-share">${i ? `${pct(share)} da base` : "base do funil"}</div>
-      <div class="fx-track"><i style="width:${f[i] ? Math.max(2, share) : 0}%"></i></div>
-    </div>`;
+  /* seletor de corretor (abaixo dos filtros de período) */
+  $("#filtrosExtra").innerHTML = `<div class="fn-sel">
+    <select id="corretorSel" class="sel">
+      <option value="">${esc(eq ? eq.nome : "Toda a imobiliária")} · resultado geral</option>
+      ${[...corretores].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")).map((x) => `<option value="${esc(x.nome)}" ${x.nome === estado.corretorSel ? "selected" : ""}>${esc(x.nome.trim())}</option>`).join("")}
+    </select>
+    ${sel ? `<button class="btn-link" id="voltarGrupo">← voltar para ${esc(eq ? eq.nome : "a imobiliária")}</button>` : ""}
+  </div>`;
+  $("#corretorSel").addEventListener("change", (e) => { estado.corretorSel = e.target.value; render(); });
+  $("#voltarGrupo")?.addEventListener("click", () => { estado.corretorSel = ""; render(); });
+
+  // f = funil mostrado; ref = com quem comparar
+  const f = sel ? sel.funil : fGrupo;
+  const ref = sel ? fGrupo : eq ? fImob : null;
+  const refRot = sel ? (eq ? "equipe" : "imob.") : "imob.";
+  heroNum({
+    rotulo: sel ? `qualificados recebidos · ${esc(nomeCurto(sel.nome))}` : "qualificados recebidos",
+    valor: f[0],
+    nota: `${pct(f[0] ? (100 * f[4]) / f[0] : null)} viraram venda<br>leads de ${dataCurta(d.periodo.inicio)} a ${dataCurta(d.periodo.fim)}`,
   });
 
-  // leitura em uma frase
-  let insight = "";
-  if (ref && g) insight = `<b>Gargalo:</b> ${CURTO[g.i - 1]} → ${CURTO[g.i]}. Passam ${pct(taxa(f, g.i))}, contra ${pct(taxa(ref, g.i))} ${refNome === "imob." ? "na imobiliária" : "na equipe"} (${pp(g.delta)}).`;
-  else if (ref) insight = `Nenhuma passagem abaixo ${refNome === "imob." ? "da imobiliária" : "da equipe"} (considerando etapas com ${MIN_GARGALO}+ leads).`;
-  else {
-    let pior = null;
-    for (let i = 1; i < f.length; i++) { const t = taxa(f, i); if (t != null && f[i - 1] >= MIN_GARGALO && (!pior || t < pior.t)) pior = { i, t }; }
-    if (pior) insight = `<b>Onde mais se perde:</b> ${CURTO[pior.i - 1]} → ${CURTO[pior.i]}. Só ${pct(pior.t)} avançam.`;
+  /* bento: as 5 etapas + o card de leitura (gargalo) */
+  const base = Math.max(1, f[0]);
+  const g = ref ? gargalo(f, ref) : null;
+  const cards = etapas.map((nome, i) => {
+    const t = i ? taxa(f, i) : null, tr = i && ref ? taxa(ref, i) : null;
+    const fraco = i && f[i - 1] < MIN_GARGALO;
+    let cmp = "";
+    if (i && ref) {
+      const dir = fraco || t == null || tr == null ? "n" : t >= tr ? "g" : "r";
+      cmp = `<span class="cmp ${dir}">${dir === "g" ? "▲" : dir === "r" ? "▼" : "·"} ${refRot} ${pct(tr)}</span>`;
+    }
+    const sub = i ? `<b>${pct(t)}</b> passaram da etapa anterior ${cmp}` : "todo lead que chegou ao corretor";
+    return statCard({
+      ico: ETAPA_ICO[i], titulo: `<span class="etapa-n">${i + 1}</span>${nome}`, sub, valor: f[i], cls: `etapa ${g && g.i === i ? "garg" : ""}`,
+      unid: i ? `${pct((100 * f[i]) / base)} da base` : "leads",
+      extra: `<span class="share"><i style="width:${f[i] ? Math.max(3, (100 * f[i]) / base) : 0}%"></i></span>`,
+    });
+  });
+  let leitura;
+  if (ref && g) {
+    leitura = { tit: "Gargalo", txt: `${CURTO[g.i - 1]} → ${CURTO[g.i]}: passam ${pct(taxa(f, g.i))}, contra ${pct(taxa(ref, g.i))} ${refRot === "imob." ? "na imobiliária" : "na equipe"}.`, val: pp(g.delta).replace(" p.p.", ""), unid: "p.p. vs referência" };
+  } else if (ref) {
+    leitura = { tit: "Sem gargalo", txt: `Nenhuma passagem abaixo ${refRot === "imob." ? "da imobiliária" : "da equipe"} (etapas com ${MIN_GARGALO}+ leads).`, val: "✓", unid: "" };
+  } else {
+    const pior = piorPassagem(f);
+    leitura = pior
+      ? { tit: "Onde mais se perde", txt: `${CURTO[pior.i - 1]} → ${CURTO[pior.i]}: só ${pct(pior.t)} dos leads avançam.`, val: pct(pior.t), unid: "avançam" }
+      : { tit: "Onde mais se perde", txt: "Ainda não há leads suficientes nas etapas.", val: "—", unid: "" };
   }
-  return `<div class="card fx">
-    <div class="fx-hd">${av || ""}<div><h3>${titulo}</h3><span>${sub}</span></div></div>
-    <div class="fx-flow">${partes}</div>
-    ${insight ? `<div class="fx-insight">${insight}</div>` : ""}
-  </div>`;
+  cards.push(`<div class="card stat glass">
+    <div class="stat-top"><span class="ico-c">${ico("alvo")}</span></div>
+    <div class="stat-tit">${leitura.tit}</div><div class="stat-sub">${leitura.txt}</div>
+    <div class="stat-base"><div class="stat-val"><b>${leitura.val}</b><small>${leitura.unid}</small></div></div>
+  </div>`);
+  $("#bento").innerHTML = cards.join("");
+
+  /* área escura: comparativo, parados e evolução */
+  const refTxt = eq ? "a equipe" : "a imobiliária";
+  const maxQ = Math.max(1, ...corretores.map((x) => x.funil[0]));
+  const celula = (fx, i, refx, garg) => {
+    const t = taxa(fx, i), tr = refx ? taxa(refx, i) : null, fraco = fx[i - 1] < MIN_GARGALO;
+    let dl = "";
+    if (t != null && tr != null && !fraco) {
+      const dv = t - tr;
+      dl = `<small class="${dv >= 0 ? "g" : "r"}">${dv >= 0 ? "▲" : "▼"} ${pp(Math.abs(dv)).replace("+", "")}</small>`;
+    }
+    return `<td class="cx ${garg ? "gargalo" : fraco ? "fraco" : ""}" title="${num(fx[i])} de ${num(fx[i - 1])}"><b>${pct(t)}</b>${dl}</td>`;
+  };
+  const linhaRef = `<tr class="ref-row"><td><div class="tb-who"><span class="av ref">∑</span><span><b>${esc(grupo)}</b><br><small>referência</small></span></div></td>
+    <td class="cx"><b>${num(fGrupo[0])}</b></td>${CURTO.slice(1).map((_, i) => `<td class="cx"><b>${pct(taxa(fGrupo, i + 1))}</b></td>`).join("")}
+    <td class="cx"><b>${pct(fGrupo[0] ? (100 * fGrupo[4]) / fGrupo[0] : null)}</b></td><td></td></tr>`;
+  const linhas = [...corretores].sort((a, b) => b.funil[0] - a.funil[0]).map((x) => {
+    const gx = gargalo(x.funil, fGrupo);
+    return `<tr class="clicavel ${x.nome === estado.corretorSel ? "selecionado" : ""}" data-nome="${esc(x.nome)}">
+      <td><div class="tb-who">${avatar(x.nome)}<b>${esc(x.nome.trim())}</b></div></td>
+      <td class="cx"><b>${num(x.funil[0])}</b><span class="tb-bar"><i style="width:${(x.funil[0] / maxQ) * 100}%"></i></span></td>
+      ${CURTO.slice(1).map((_, i) => celula(x.funil, i + 1, fGrupo, gx && gx.i === i + 1)).join("")}
+      <td class="cx"><b>${pct(x.funil[0] ? (100 * x.funil[4]) / x.funil[0] : null)}</b></td>
+      <td>${gx ? `<span class="dk-tag ruim">${CURTO[gx.i - 1]} → ${CURTO[gx.i]}</span>` : `<span class="dk-tag sutil">—</span>`}</td>
+    </tr>`;
+  }).join("");
+
+  const alvoNomes = sel ? [sel.nome] : corretores.map((x) => x.nome);
+  const alvoChaves = new Set(alvoNomes.map(chave));
+  const parados = (d.alertas || []).filter((a) => alvoChaves.has(chave(a.corretor)));
+  const porEtapa = etapas.map((e) => ({ e, n: parados.filter((a) => (a.etapaFunil || "Qualificado") === e).length })).filter((x) => x.n);
+  const graves = parados.filter((a) => a.diasParado > 30).length;
+  const LIM = 24;
+
+  const escuro = $("#escuroIn");
+  escuro.innerHTML = `<section>
+      ${secao(`Comparativo ${eq ? "da equipe" : "dos corretores"}`, "taxa de passagem entre etapas · clique num corretor pra abrir o funil dele")}
+      <div class="legenda">
+        <span><i class="g">▲</i> acima de ${refTxt}</span><span><i class="r">▼</i> abaixo de ${refTxt}</span>
+        <span><i class="lg-garg"></i> gargalo: maior queda vs ${refTxt}</span><span><i class="lg-fraco"></i> menos de ${MIN_GARGALO} leads na etapa anterior</span>
+      </div>
+      <div class="dk-card tabela rolavel"><table class="fn-tab">
+        <thead><tr><th>Corretor</th><th>Qualificados</th>${CURTO.slice(1).map((e, i) => `<th>${CURTO[i]} →<br>${e}</th>`).join("")}<th>Qualif. →<br>Venda</th><th>Gargalo</th></tr></thead>
+        <tbody>${linhaRef}${linhas || `<tr><td colspan="8" class="vazio">Sem leads no período.</td></tr>`}</tbody>
+      </table></div>
+    </section>
+    <section class="secao">
+      ${secao(sel ? `Leads parados de ${esc(nomeCurto(sel.nome))}` : "Leads parados", `ativos, sem movimentação há +15 dias · capturados nos últimos ${d.alertaJanelaDias || 45} dias`)}
+      ${d.alertasProntos && parados.length ? `<div class="pd-resumo">
+        <div><b>${num(parados.length)}</b><span>leads parados</span></div>
+        <div class="grave"><b>${num(graves)}</b><span>há mais de 30 dias</span></div>
+        <div class="pd-etapas">${porEtapa.map((x) => `<span class="dk-tag">${x.e} <b>${num(x.n)}</b></span>`).join("")}</div>
+      </div>` : ""}
+      ${listaParadosHTML(d, estado.paradosTodos ? parados : parados.slice(0, LIM), { mostrarCorretor: !sel })}
+      ${parados.length > LIM ? `<button class="btn-mais" id="paradosMais">${estado.paradosTodos ? "Mostrar menos" : `Mostrar todos (${num(parados.length)})`}</button>` : ""}
+    </section>
+    <section class="secao">
+      ${secao("Evolução", `${estado.evoJanela === "semana" ? "últimos 7 dias × os 7 dias antes" : "mês atual × mesmo trecho do mês anterior"} · não depende do filtro de período`,
+        `<div class="pills" id="evoJanela"><button class="pill-b ${estado.evoJanela === "semana" ? "ativo" : ""}" data-j="semana">Semana</button><button class="pill-b ${estado.evoJanela !== "semana" ? "ativo" : ""}" data-j="mes">Mês</button></div>`)}
+      ${evolucaoHTML(estado.evolucao, alvoNomes, sel ? sel.nome.trim() : eq ? eq.nome : "toda a imobiliária")}
+    </section>`;
+
+  escuro.querySelectorAll("tr[data-nome]").forEach((tr) => tr.addEventListener("click", () => {
+    estado.corretorSel = tr.dataset.nome;
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }));
+  escuro.querySelector("#paradosMais")?.addEventListener("click", () => { estado.paradosTodos = !estado.paradosTodos; render(); });
+  escuro.querySelector("#evoJanela").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-j]"); if (!b) return;
+    estado.evoJanela = b.dataset.j; render();
+  });
 }
 
 function evolucaoHTML(ev, nomes, alvo) {
-  if (estado.evolucaoErro && !ev) return `<div class="card vazio">Não consegui calcular a evolução: ${esc(estado.evolucaoErro)}</div>`;
-  if (!ev) return `<div class="card vazio">⏳ Calculando semana e mês anteriores… a 1ª vez pode levar ~1 min.</div>`;
+  if (estado.evolucaoErro && !ev) return `<div class="dk-card vazio">Não consegui calcular a evolução: ${esc(estado.evolucaoErro)}</div>`;
+  if (!ev) return `<div class="dk-card vazio">Calculando semana e mês anteriores… a 1ª vez pode levar ~1 min.</div>`;
   const doGrupo = (k) => {
     const js = nomes.map((n) => ev.porChave[chave(n)]?.[k]).filter(Boolean);
     return { funil: somaFunil(js.map((j) => j.funil)), vendas: js.reduce((s, j) => s + j.vendas, 0) };
   };
-  const fmtD = (iso) => iso.slice(8, 10) + "/" + iso.slice(5, 7);
   const [kA, kB] = estado.evoJanela === "semana" ? ["semanaAtual", "semanaAnterior"] : ["mesAtual", "mesAnterior"];
   const a = doGrupo(kA), b = doGrupo(kB), ja = ev.janelas[kA], jb = ev.janelas[kB];
-  const rotA = `${fmtD(ja.inicio)}–${fmtD(ja.fim)}`, rotB = `${fmtD(jb.inicio)}–${fmtD(jb.fim)}`;
-  const tq = (f) => (f[0] ? (100 * f[3]) / f[0] : null);
+  const rotA = `${dataCurta(ja.inicio)}–${dataCurta(ja.fim)}`, rotB = `${dataCurta(jb.inicio)}–${dataCurta(jb.fim)}`;
+  const tq = (fx) => (fx[0] ? (100 * fx[3]) / fx[0] : null);
   const met = [
     { nome: "Qualificados recebidos", a: a.funil[0], b: b.funil[0] },
     { nome: "Agendamento/Crédito", a: a.funil[1], b: b.funil[1] },
@@ -577,168 +637,22 @@ function evolucaoHTML(ev, nomes, alvo) {
   ];
   const tiles = met.map((m) => {
     const v = (x) => (m.taxa ? pct(x) : num(x));
-    let delta = `<span class="pill n">sem base</span>`;
+    let delta = `<span class="dk-tag sutil">sem base</span>`;
     if (m.a != null && m.b != null) {
       const dv = m.a - m.b;
       const txt = m.taxa ? pp(dv) : m.b ? `${dv > 0 ? "+" : ""}${Math.round((100 * dv) / m.b)}%` : dv ? `+${num(dv)}` : "igual";
-      delta = `<span class="pill ${dv > 0 ? "g" : dv < 0 ? "r" : "n"}">${dv > 0 ? "▲ " : dv < 0 ? "▼ " : ""}${txt}</span>`;
+      delta = `<span class="dk-tag ${dv > 0 ? "bom" : dv < 0 ? "ruim" : "sutil"}">${dv > 0 ? "▲ " : dv < 0 ? "▼ " : ""}${txt}</span>`;
     }
     const max = Math.max(m.a || 0, m.b || 0) || 1;
-    return `<div class="evo-tile">
+    return `<div class="dk-card evo">
       <div class="evo-rot">${m.nome}</div>
       <div class="evo-val"><b>${v(m.a)}</b>${delta}</div>
-      <div class="evo-bars">
-        <div class="evo-bar atual"><span>${rotA}</span><i><u style="width:${((m.a || 0) / max) * 100}%"></u></i><em>${v(m.a)}</em></div>
-        <div class="evo-bar ant"><span>${rotB}</span><i><u style="width:${((m.b || 0) / max) * 100}%"></u></i><em>${v(m.b)}</em></div>
-      </div>
+      <div class="evo-bar atual"><span>${rotA}</span><i><u style="width:${((m.a || 0) / max) * 100}%"></u></i><em>${v(m.a)}</em></div>
+      <div class="evo-bar ant"><span>${rotB}</span><i><u style="width:${((m.b || 0) / max) * 100}%"></u></i><em>${v(m.b)}</em></div>
     </div>`;
   }).join("");
-  return `<div class="evo-tiles">${tiles}</div>
+  return `<div class="evo-grid">${tiles}</div>
     <p class="nota">Evolução de ${esc(alvo)}. Etapas = leads recebidos em cada janela e até onde chegaram; vendas pela data da venda.</p>`;
-}
-
-function renderFunil(d) {
-  const c = $("#conteudo");
-  c.innerHTML = "";
-  const etapas = d.etapasFunil || ETAPAS_PADRAO;
-  const grupo = nomeGrupo();
-  const eq = equipeAtual();
-  const refNome = eq ? "equipe" : "imob.";
-  const corretores = d.corretores.filter((x) => naEquipe(x.nome) && x.funil && x.leads > 0);
-  const fGrupo = somaFunil(corretores.map((x) => x.funil));
-  const fImob = somaFunil(d.corretores.filter((x) => x.funil).map((x) => x.funil));
-  if (estado.corretorSel && !corretores.some((x) => x.nome === estado.corretorSel)) estado.corretorSel = "";
-  const sel = corretores.find((x) => x.nome === estado.corretorSel);
-  const idxCor = Object.fromEntries([...d.corretores].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")).map((x, i) => [x.nome, i]));
-  const per = `${d.periodo.inicio.split("-").reverse().join("/")} a ${d.periodo.fim.split("-").reverse().join("/")}`;
-
-  /* seletor de corretor */
-  const top = document.createElement("section");
-  top.className = "fn-top anim";
-  top.innerHTML = `<label>Ver funil de
-    <select id="corretorSel" class="sel">
-      <option value="">${esc(eq ? eq.nome : "Toda a imobiliária")} (resultado geral)</option>
-      ${[...corretores].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")).map((x) => `<option value="${esc(x.nome)}" ${x.nome === estado.corretorSel ? "selected" : ""}>${esc(x.nome.trim())}</option>`).join("")}
-    </select></label>
-    ${sel ? `<button class="btn-link" id="voltarGrupo">← voltar para ${esc(eq ? eq.nome : "a imobiliária")}</button>` : ""}
-    <span class="fn-per">leads recebidos de ${per}</span>`;
-  top.querySelector("#corretorSel").addEventListener("change", (e) => { estado.corretorSel = e.target.value; render(); });
-  top.querySelector("#voltarGrupo")?.addEventListener("click", () => { estado.corretorSel = ""; render(); });
-  c.appendChild(top);
-
-  /* funil em degraus */
-  const secF = document.createElement("section");
-  secF.className = "anim";
-  secF.style.animationDelay = "60ms";
-  if (sel) {
-    secF.innerHTML = funilFluxoHTML({
-      titulo: esc(sel.nome.trim()), av: avatar(sel.nome, idxCor[sel.nome] ?? 0),
-      sub: `${num(sel.funil[0])} qualificados recebidos · comparado com ${esc(eq ? eq.nome : "a imobiliária")}`,
-      f: sel.funil, ref: fGrupo, refNome, etapas,
-    });
-  } else {
-    secF.innerHTML = funilFluxoHTML({
-      titulo: esc(eq ? eq.nome : "Imobiliária"),
-      sub: `${corretores.length} corretores · ${num(fGrupo[0])} qualificados recebidos${eq ? " · comparado com a imobiliária" : ""}`,
-      f: fGrupo, ref: eq ? fImob : null, refNome: "imob.", etapas,
-    });
-  }
-  c.appendChild(secF);
-
-  /* comparativo */
-  const refTxt = eq ? "a equipe" : "a imobiliária";
-  const sec2 = document.createElement("section");
-  sec2.className = "secao anim";
-  sec2.style.animationDelay = "120ms";
-  sec2.innerHTML = `<div class="secao-hd"><h2>Comparativo ${eq ? "da equipe" : "dos corretores"}</h2><span>taxa de passagem entre etapas · clique num corretor pra abrir o funil dele</span></div>
-    <div class="legenda">
-      <span><i class="lg-g">▲</i> acima de ${refTxt}</span>
-      <span><i class="lg-r">▼</i> abaixo de ${refTxt}</span>
-      <span><i class="lg-garg"></i> gargalo: maior queda vs ${refTxt}</span>
-      <span><i class="lg-fraco"></i> menos de ${MIN_GARGALO} leads na etapa anterior</span>
-    </div>`;
-  const maxQ = Math.max(1, ...corretores.map((x) => x.funil[0]));
-  const celula = (f, i, ref, garg) => {
-    const t = taxa(f, i), tr = ref ? taxa(ref, i) : null, fraco = f[i - 1] < MIN_GARGALO;
-    let d = "";
-    if (t != null && tr != null && !fraco) {
-      const dv = t - tr;
-      d = `<small class="${dv >= 0 ? "g" : "r"}">${dv >= 0 ? "▲" : "▼"} ${pp(Math.abs(dv)).replace("+", "")}</small>`;
-    }
-    return `<td class="cx ${garg ? "gargalo" : fraco ? "fraco" : ""}" title="${num(f[i])} de ${num(f[i - 1])}"><b>${pct(t)}</b>${d}</td>`;
-  };
-  const linhaRef = `<tr class="fn-ref-row"><td><div class="rk"><span class="rk-av ref">∑</span><span><span class="rk-nome">${esc(grupo)}</span><br><span class="rk-sub">referência</span></span></div></td>
-    <td class="cx"><b>${num(fGrupo[0])}</b></td>${CURTO.slice(1).map((_, i) => `<td class="cx"><b>${pct(taxa(fGrupo, i + 1))}</b></td>`).join("")}
-    <td class="cx"><b>${pct(fGrupo[0] ? (100 * fGrupo[4]) / fGrupo[0] : null)}</b></td><td></td></tr>`;
-  const linhas = [...corretores].sort((a, b) => b.funil[0] - a.funil[0]).map((x) => {
-    const g = gargalo(x.funil, fGrupo);
-    return `<tr class="clicavel ${x.nome === estado.corretorSel ? "sel" : ""}" data-nome="${esc(x.nome)}">
-      <td><div class="rk">${avatar(x.nome, idxCor[x.nome] ?? 0)}<span class="rk-nome">${esc(x.nome.trim())}</span></div></td>
-      <td class="cx"><b>${num(x.funil[0])}</b><span class="mini-bar"><i style="width:${(x.funil[0] / maxQ) * 100}%"></i></span></td>
-      ${CURTO.slice(1).map((_, i) => celula(x.funil, i + 1, fGrupo, g && g.i === i + 1)).join("")}
-      <td class="cx"><b>${pct(x.funil[0] ? (100 * x.funil[4]) / x.funil[0] : null)}</b></td>
-      <td>${g ? `<span class="tag-garg">${CURTO[g.i - 1]} → ${CURTO[g.i]}</span>` : `<span class="pill n">—</span>`}</td>
-    </tr>`;
-  }).join("");
-  const wrap = document.createElement("div");
-  wrap.className = "tabela-wrap rolavel";
-  wrap.innerHTML = `<table class="fn-tab"><thead><tr><th>Corretor</th><th>Qualificados</th>${CURTO.slice(1).map((e, i) => `<th>${CURTO[i]} <span>→</span><br>${e}</th>`).join("")}<th>Qualif. <span>→</span><br>Venda</th><th>Gargalo</th></tr></thead>
-    <tbody>${linhaRef}${linhas || `<tr><td colspan="8" class="vazio">Sem leads no período.</td></tr>`}</tbody></table>`;
-  wrap.querySelectorAll("tr[data-nome]").forEach((tr) => tr.addEventListener("click", () => {
-    estado.corretorSel = tr.dataset.nome;
-    render();
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }));
-  sec2.appendChild(wrap);
-  c.appendChild(sec2);
-
-  /* leads parados */
-  const alvoNomes = sel ? [sel.nome] : corretores.map((x) => x.nome);
-  const alvoChaves = new Set(alvoNomes.map(chave));
-  const parados = (d.alertas || []).filter((a) => alvoChaves.has(chave(a.corretor)));
-  const sec3 = document.createElement("section");
-  sec3.className = "secao anim";
-  sec3.style.animationDelay = "160ms";
-  sec3.innerHTML = `<div class="secao-hd"><h2>🚨 Leads parados${sel ? ` de ${esc(sel.nome.trim())}` : ""}</h2><span>ativos, sem movimentação há +15 dias · capturados nos últimos ${d.alertaJanelaDias || 45} dias</span></div>`;
-  if (!d.alertasProntos) sec3.innerHTML += `<div class="alertas-box"><div class="vazio">⏳ Calculando varredura… recarrega em instantes.</div></div>`;
-  else if (!parados.length) sec3.innerHTML += `<div class="alertas-box"><div class="vazio">🎉 Nenhum lead parado além de 15 dias.</div></div>`;
-  else {
-    const porEtapa = etapas.map((e) => ({ e, n: parados.filter((a) => (a.etapaFunil || "Qualificado") === e).length })).filter((x) => x.n);
-    const graves = parados.filter((a) => a.diasParado > 30).length;
-    const LIM = 24;
-    const lista = estado.paradosTodos ? parados : parados.slice(0, LIM);
-    sec3.innerHTML += `<div class="parados-resumo">
-        <div class="pr-total"><b>${num(parados.length)}</b><span>leads parados</span></div>
-        <div class="pr-graves"><b>${num(graves)}</b><span>há mais de 30 dias</span></div>
-        <div class="pr-etapas">${porEtapa.map((x) => `<span class="pr-chip">${x.e} <b>${num(x.n)}</b></span>`).join("")}</div>
-      </div>
-      <div class="parados-grid">${lista.map((a) => `
-        <div class="parado ${a.diasParado > 30 ? "grave" : ""}">
-          <div class="alerta-dias"><b>${a.diasParado}</b><span>dias</span></div>
-          <div class="alerta-info">
-            <div class="l">${esc(a.lead)} ${a.telefone ? `<span class="alerta-tel">· ${esc(a.telefone)}</span>` : ""}</div>
-            <div class="m"><span class="pr-chip sm">${esc(a.etapaFunil || "Qualificado")}</span>${sel ? "" : ` <span class="tag-corr">${esc(a.corretor.trim())}</span>`}${a.situacao ? ` <span class="sit">${esc(a.situacao.trim())}</span>` : ""}</div>
-          </div>
-        </div>`).join("")}</div>
-      ${parados.length > LIM ? `<button class="btn-mais" id="paradosMais">${estado.paradosTodos ? "Mostrar menos" : `Mostrar todos (${num(parados.length)})`}</button>` : ""}`;
-    sec3.querySelector("#paradosMais")?.addEventListener("click", () => { estado.paradosTodos = !estado.paradosTodos; render(); });
-  }
-  c.appendChild(sec3);
-
-  /* evolução */
-  const sec4 = document.createElement("section");
-  sec4.className = "secao anim";
-  sec4.style.animationDelay = "200ms";
-  sec4.innerHTML = `<div class="secao-hd evo-hd"><h2>Evolução</h2><span>${estado.evoJanela === "semana" ? "últimos 7 dias × os 7 dias antes" : "mês atual × mesmo trecho do mês anterior"} · não depende do filtro de período</span>
-    <div class="chips mini" id="evoJanela"><button class="chip ${estado.evoJanela === "semana" ? "ativo" : ""}" data-j="semana">Semana</button><button class="chip ${estado.evoJanela !== "semana" ? "ativo" : ""}" data-j="mes">Mês</button></div></div>`;
-  sec4.querySelector("#evoJanela").addEventListener("click", (e) => {
-    const b = e.target.closest("[data-j]"); if (!b) return;
-    estado.evoJanela = b.dataset.j; render();
-  });
-  const evBox = document.createElement("div");
-  evBox.innerHTML = evolucaoHTML(estado.evolucao, alvoNomes, sel ? sel.nome.trim() : eq ? eq.nome : "toda a imobiliária");
-  sec4.appendChild(evBox);
-  c.appendChild(sec4);
 }
 
 async function carregarEvolucao() {
@@ -758,10 +672,17 @@ async function carregarEvolucao() {
 }
 
 /* ---------- eventos ---------- */
-$("#views").addEventListener("click", (e) => {
-  const b = e.target.closest(".view-tab"); if (!b) return;
-  estado.view = b.dataset.view;
+function irPara(view) {
+  estado.view = view;
   if (estado.data) render();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+$("#views").addEventListener("click", (e) => {
+  const b = e.target.closest(".view-tab"); if (b) irPara(b.dataset.view);
+});
+// botões "abrir" dos cards
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-go]"); if (b) irPara(b.dataset.go);
 });
 $("#chips").addEventListener("click", (e) => {
   const b = e.target.closest(".chip"); if (!b) return;

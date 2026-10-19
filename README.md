@@ -39,7 +39,7 @@ poucos minutos você recebe um link fixo (ex.: `https://elite-lion.onrender.com`
   gerente salva o link da própria equipe e vê o resultado geral dela.
 
 **Filtro de período:** Semana · Mês atual · Personalizado. **Auto-refresh** a cada 3 min
-(modo TV) e alternância de **tema claro/escuro** (botão no topo, padrão escuro).
+(modo TV) e alternância de **tema claro/escuro** (botão no topo, padrão claro). Visual nas cores da Lion: preto, branco, off-white e terracota.
 
 ### Score de Performance
 
