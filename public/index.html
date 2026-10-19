@@ -1,77 +1,67 @@
 <!doctype html>
-<html lang="pt-BR" data-theme="light">
+<html lang="pt-BR" data-theme="dark">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Ranking de Performance · Lion Negócios Imobiliários</title>
   <!-- app instalável (tela de início do celular) -->
   <link rel="manifest" href="/manifest.webmanifest" />
-  <meta name="theme-color" content="#e7e6e2" media="(prefers-color-scheme: light)" />
-  <meta name="theme-color" content="#121211" media="(prefers-color-scheme: dark)" />
+  <meta name="theme-color" content="#121211" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="Elite Lion" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
   <link rel="icon" type="image/png" sizes="48x48" href="/icons/favicon-48.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800;900&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <div class="glow" aria-hidden="true"></div>
+  <div class="glow"></div>
 
-  <header class="topo">
-    <div class="marca">
+  <header class="topbar">
+    <div class="brand">
       <img class="brand-logo brand-dark" src="/logo-lion-branco.png" alt="Lion Negócios Imobiliários" />
       <img class="brand-logo brand-light" src="/logo-lion-preto.png" alt="Lion Negócios Imobiliários" />
-      <span class="ao-vivo"><i></i>ao vivo</span>
+      <span class="ao-vivo"><i></i>AO VIVO</span>
     </div>
-    <nav class="views" id="views" aria-label="Visões">
-      <button class="view-tab ativo" data-view="ranking">Ranking</button>
-      <button class="view-tab" data-view="funil">Funil</button>
-      <button class="view-tab" data-view="perfil">Perfil</button>
-      <button class="view-tab" data-view="metodo">Como funciona</button>
-    </nav>
-    <div class="topo-dir">
+    <div class="controls">
       <select id="equipeSel" class="sel oculto" aria-label="Equipe"></select>
-      <button class="ic-btn" id="themeToggle" title="Alternar tema" aria-label="Alternar tema"></button>
-      <div class="atualizado"><b>Atualizado</b><span id="atualizadoEm">…</span></div>
+      <div class="chips" id="chips">
+        <button class="chip" data-preset="semana">Semana</button>
+        <button class="chip ativo" data-preset="mes">Mês</button>
+        <button class="chip" data-preset="custom">Período</button>
+      </div>
+      <div class="datas oculto" id="datasCustom">
+        <input type="date" id="inicio" /><span>→</span><input type="date" id="fim" />
+        <button class="btn" id="aplicar">OK</button>
+      </div>
+      <button class="theme-toggle" id="themeToggle" title="Alternar tema" aria-label="Alternar tema">
+        <span class="ico-sol">☀︎</span><span class="ico-lua">☾</span>
+      </button>
     </div>
   </header>
 
-  <main>
-    <section class="palco">
-      <div class="palco-esq">
-        <h1 id="titulo">Ranking dos corretores</h1>
-        <div class="filtros">
-          <div class="chips" id="chips">
-            <button class="chip" data-preset="semana">Semana</button>
-            <button class="chip ativo" data-preset="mes">Mês</button>
-            <button class="chip" data-preset="custom">Período</button>
-          </div>
-          <div class="datas oculto" id="datasCustom">
-            <input type="date" id="inicio" /><span>→</span><input type="date" id="fim" />
-            <button class="btn" id="aplicar">OK</button>
-          </div>
-        </div>
-        <div id="filtrosExtra"></div>
-        <div id="heroNum"></div>
-      </div>
-      <div class="palco-dir" id="bento"></div>
-    </section>
-    <div id="conteudo">
-      <div class="carregando"><div class="loader"></div><p>Consultando o Supremo CRM…</p></div>
+  <nav class="views" id="views">
+    <button class="view-tab" data-view="tv">Modo TV</button>
+    <button class="view-tab ativo" data-view="ranking">Ranking</button>
+    <button class="view-tab" data-view="funil">Funil</button>
+    <button class="view-tab" data-view="perfil">Perfil comportamental</button>
+    <button class="view-tab" data-view="metodo">Como o score é calculado</button>
+  </nav>
+
+  <main id="conteudo">
+    <div class="carregando" id="carregando">
+      <div class="loader"></div>
+      <p>Consultando o Supremo CRM…</p>
     </div>
   </main>
 
-  <section class="escuro oculto" id="escuro">
-    <div class="escuro-alca" aria-hidden="true"></div>
-    <div class="escuro-in" id="escuroIn"></div>
-  </section>
-
   <footer class="rodape"><span id="rodapeInfo"></span></footer>
+
+  <div id="tv" class="tv oculto"></div>
 
   <script src="/app.js"></script>
 </body>
