@@ -746,6 +746,7 @@ function renderFunil(d) {
 async function carregarEvolucao() {
   try {
     const r = await fetch("/api/evolucao");
+    if (r.status === 202) return; // ainda calculando no servidor; tenta de novo no próximo ciclo
     const ev = await r.json();
     if (!r.ok) throw new Error(ev.detalhe || ev.erro || "Falha");
     // indexa por nome normalizado (equipes.json pode vir com acento/caixa diferente)

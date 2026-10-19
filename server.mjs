@@ -245,6 +245,13 @@ const server = createServer(async (req, res) => {
     }
 
     if (url.pathname === "/api/evolucao") {
+      // Na subida, a evolucao (a busca mais pesada) espera o ranking do mes ficar
+      // pronto, para nao disputar o limite do Supremo com o que a TV mostra primeiro.
+      const mes = periodoMesAtual();
+      if (!evolucaoCache && !cache.has(`${mes.inicio}|${mes.fim}`)) {
+        res.writeHead(202, { "content-type": "application/json; charset=utf-8" });
+        return res.end(JSON.stringify({ pendente: true }));
+      }
       const data = await getEvolucao();
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       return res.end(JSON.stringify(data));
@@ -288,14 +295,18 @@ server.listen(PORT, () => {
   // quem abrir o painel pegue sempre o cache quente.
   const aquecer = () => {
     const { inicio, fim } = periodoMesAtual();
-    buscarEAgregar(inicio, fim)
+    return buscarEAgregar(inicio, fim)
       .then((d) => console.log(`  [cache] mes atual pronto: ${d.resumo.leads} leads, ${d.resumo.vendas} vendas, ${d.resumo.parados15d} parados`))
       .catch((e) => console.error("  [cache] falha ao aquecer:", e.message));
   };
-  setTimeout(aquecer, 500);
+  // Ordem na subida: 1) ranking do mes (o que a TV mostra primeiro), 2) varredura
+  // de parados, 3) evolucao. Tudo em sequencia para nao estourar o limite do Supremo.
+  setTimeout(async () => {
+    await aquecer();
+    await getAlertas().catch((e) => console.error("  [cache] falha nos parados:", e.message));
+    await buscarEvolucao().catch((e) => console.error("  [cache] falha na evolucao:", e.message));
+  }, 500);
   setInterval(aquecer, CACHE_TTL);
-  // Evolucao (semana/mes x anteriores): aquece depois do mes atual e revalida com ciclo proprio.
-  setTimeout(() => buscarEvolucao().catch((e) => console.error("  [cache] falha na evolucao:", e.message)), 5000);
   setInterval(() => buscarEvolucao().catch(() => {}), CACHE_TTL * 2);
   // Alerta global (varredura de 45 dias) tem ciclo proprio, mais espacado.
   setInterval(() => getAlertas().catch(() => {}), ALERTA_TTL);

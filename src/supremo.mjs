@@ -16,11 +16,30 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const MIN_INTERVALO_MS = 1050;
 let ultimaChamada = 0;
 let fila = Promise.resolve();
+// Freio global: quando o Supremo responde 429, TODA a fila para por um tempo que
+// dobra a cada 429 seguido (30s, 60s, 120s... até 5 min) e zera no primeiro
+// sucesso. Insistir a cada segundo mantém o bloqueio ativo indefinidamente.
+let pausaAte = 0;
+let pausaAtual = 0;
+const PAUSA_MIN = 30_000, PAUSA_MAX = 5 * 60_000;
+function registrar429() {
+  pausaAtual = pausaAtual ? Math.min(PAUSA_MAX, pausaAtual * 2) : PAUSA_MIN;
+  pausaAte = Date.now() + pausaAtual;
+  console.warn(`  [supremo] 429: pausando consultas por ${Math.round(pausaAtual / 1000)}s`);
+}
+function registrarSucesso() {
+  pausaAtual = 0;
+}
+export function statusLimite() {
+  return { pausado: Date.now() < pausaAte, retomaEm: pausaAte };
+}
 function throttle() {
   const anterior = fila;
   let liberar;
   fila = new Promise((r) => (liberar = r));
   return anterior.then(async () => {
+    const pausa = pausaAte - Date.now();
+    if (pausa > 0) await sleep(pausa);
     const espera = MIN_INTERVALO_MS - (Date.now() - ultimaChamada);
     if (espera > 0) await sleep(espera);
     ultimaChamada = Date.now();
@@ -30,7 +49,7 @@ function throttle() {
 
 // Busca uma pagina com retry e backoff. Trata 429/5xx com espera maior
 // (respeitando Retry-After quando presente).
-async function fetchPage(path, token, { retries = 7 } = {}) {
+async function fetchPage(path, token, { retries = 10 } = {}) {
   const url = `${BASE}${path}`;
   let lastErr;
   for (let attempt = 0; attempt < retries; attempt++) {
@@ -40,16 +59,21 @@ async function fetchPage(path, token, { retries = 7 } = {}) {
         headers: { Authorization: `Bearer ${token}` },
         signal: AbortSignal.timeout(30000),
       });
-      if (res.status === 429 || res.status >= 500) {
-        // 429 = bucket vazio; espera o refill (~1/seg). Retry-After tem prioridade.
+      if (res.status === 429) {
+        // Bloqueio por excesso de consultas: aciona o freio global (a própria
+        // fila espera antes da próxima tentativa). Retry-After tem prioridade.
         const ra = Number(res.headers.get("retry-after"));
-        const espera = ra > 0 ? ra * 1000 : Math.min(15000, 3000 + 2000 * attempt);
-        await sleep(espera);
+        if (ra > 0) { pausaAte = Date.now() + ra * 1000; } else registrar429();
+        throw new Error(`HTTP 429 em ${url}`);
+      }
+      if (res.status >= 500) {
+        await sleep(Math.min(15000, 3000 + 2000 * attempt));
         throw new Error(`HTTP ${res.status} em ${url}`);
       }
       if (!res.ok) throw new Error(`HTTP ${res.status} em ${url}`);
       const json = await res.json();
       if (!json || !Array.isArray(json.data)) throw new Error(`Resposta sem data em ${url}`);
+      registrarSucesso();
       return json;
     } catch (err) {
       lastErr = err;
