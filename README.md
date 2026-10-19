@@ -44,9 +44,10 @@ poucos minutos você recebe um link fixo (ex.: `https://elite-lion.onrender.com`
 ### Score de Performance
 
 Índice de 0 a 100 que combina, normalizado entre os corretores do período:
-vendas (30%), propostas (25%), conversão (20%), 1º contato (15%) e consistência (10%).
-É o que ordena o pódio e o ranking por padrão. Volume e movimentação ficam só no perfil
-comportamental: o pré-atendimento é da recepção e o corretor já recebe o lead qualificado.
+vendas (35%), propostas (30%), conversão (20%) e consistência (15%).
+É o que ordena o pódio e o ranking por padrão. Volume, movimentação e 1º contato ficam só
+no perfil comportamental: o pré-atendimento é da recepção e o corretor já recebe o lead
+qualificado.
 
 ### Funil
 

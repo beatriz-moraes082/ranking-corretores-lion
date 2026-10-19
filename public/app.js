@@ -59,12 +59,12 @@ const DIMS = [
   { key: "mov", label: "Movimentação", short: "Movim.", raw: (c) => (c.leads ? c.movimentados / c.leads : 0), disp: (c) => `${Math.round((c.leads ? c.movimentados / c.leads : 0) * 100)}%` },
   { key: "consist", label: "Consistência", short: "Consist.", raw: (c) => (c.leads ? -(c.parados15d / c.leads) : 0), disp: (c) => `${c.parados15d} parados` },
 ];
-// Score: volume e movimentação ficam só no radar (o pré-atendimento é da recepção,
-// o corretor já recebe o lead qualificado). Proposta entra com peso alto porque
+// Score: volume, movimentação e 1º contato ficam só no radar (o pré-atendimento é
+// da recepção, o corretor já recebe o lead qualificado). Proposta entra com peso alto porque
 // acontece mais que venda e converte bem, mostra quem está construindo resultado.
 const DIM_PROPOSTAS = { key: "propostas", label: "Propostas", short: "Propostas", raw: (c) => c.propostas || 0, disp: (c) => `${c.propostas || 0} proposta${c.propostas === 1 ? "" : "s"}` };
-const SCORE_DIMS = [DIMS[1], DIM_PROPOSTAS, DIMS[2], DIMS[3], DIMS[5]];
-const PESOS = { vendas: 0.3, propostas: 0.25, conversao: 0.2, contato: 0.15, consist: 0.1 };
+const SCORE_DIMS = [DIMS[1], DIM_PROPOSTAS, DIMS[2], DIMS[5]];
+const PESOS = { vendas: 0.35, propostas: 0.3, conversao: 0.2, consist: 0.15 };
 
 function calcularPerfis(corretores) {
   const cohort = corretores.filter((c) => c.leads > 0);
@@ -240,7 +240,7 @@ function renderRanking(d, perfis) {
     const medals = ["🥇", "🥈", "🥉"];
     const sec = document.createElement("section");
     sec.className = "secao";
-    sec.innerHTML = `<div class="secao-hd"><h2>Pódio do período</h2><span>score = mix de vendas, propostas, conversão, 1º contato e consistência</span></div>`;
+    sec.innerHTML = `<div class="secao-hd"><h2>Pódio do período</h2><span>score = mix de vendas, propostas, conversão e consistência</span></div>`;
     const grid = document.createElement("div");
     grid.className = "podio";
     grid.innerHTML = ordemVisual.map((idx) => {
@@ -369,7 +369,7 @@ function renderPerfil(perfis) {
   const c = $("#conteudo");
   c.innerHTML = "";
   const sec = document.createElement("section");
-  sec.innerHTML = `<div class="secao-hd" style="margin-top:6px"><h2>Perfil comportamental</h2><span>${perfis.length} corretores · 6 dimensões, normalizadas entre os corretores do período · Volume e Movimentação ficam só aqui, fora do score</span></div>`;
+  sec.innerHTML = `<div class="secao-hd" style="margin-top:6px"><h2>Perfil comportamental</h2><span>${perfis.length} corretores · 6 dimensões, normalizadas entre os corretores do período · Volume, Movimentação e 1º contato ficam só aqui, fora do score</span></div>`;
   const grid = document.createElement("div");
   grid.className = "radar-grid";
   grid.innerHTML = perfis.length ? perfis.map((p, i) => radarCardHTML(p, i)).join("") : `<div class="vazio">Sem corretores com leads no período.</div>`;
@@ -456,9 +456,8 @@ function renderMetodo(perfis) {
   cardC.className = "card";
   cardC.innerHTML = `<ul class="caveats">
     <li><b>É relativo, não absoluto.</b> O mesmo corretor pode ter score diferente se você muda o período ou o conjunto de colegas comparados.</li>
-    <li><b>1º contato</b> é o tempo entre a captura do lead e a qualificação, quanto menor, melhor a nota.</li>
     <li><b>Consistência</b> é medida por lead: um corretor com muitos leads e alguns parados pode pontuar melhor que outro com poucos leads e vários parados.</li>
-    <li><b>Volume e Movimentação não entram no score.</b> O pré-atendimento é feito pela recepção e o corretor já recebe o lead qualificado, então quantos leads ele recebe não depende dele. As duas continuam no perfil comportamental, pra ver quem recebe muito e converte pouco.</li>
+    <li><b>Volume, Movimentação e 1º contato não entram no score.</b> O pré-atendimento é feito pela recepção e o corretor já recebe o lead qualificado: quantos leads ele recebe e o tempo da captura até a qualificação não dependem dele. Os três continuam no perfil comportamental e na tabela, como informação (dá pra ver, por exemplo, quem recebe muito e converte pouco).</li>
     <li><b>Propostas</b> tem peso alto porque acontece com mais frequência que a venda e converte bem: mostra quem está construindo resultado antes do fechamento. Conta os leads recebidos no período que estão em Proposta ou já viraram venda.</li>
     <li><b>Os pesos são ajustáveis.</b> Se para a Lion vale mais proposta, ou punir mais os leads parados, é só recalibrar.</li>
   </ul>
