@@ -55,6 +55,8 @@ function lerTema() { try { return localStorage.getItem(TEMA_KEY) || "light"; } c
 function aplicarTema(t) {
   document.documentElement.setAttribute("data-theme", t);
   $("#themeToggle").innerHTML = ico(t === "dark" ? "sol" : "lua");
+  // barra de status do celular acompanha o tema escolhido
+  document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute("content", t === "dark" ? "#121211" : "#e7e6e2"));
 }
 function toggleTema() {
   const novo = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
@@ -703,6 +705,18 @@ $("#equipeSel").addEventListener("change", (e) => {
   if (estado.data) render();
 });
 estado.equipe = new URL(location.href).searchParams.get("equipe") || "";
+// No app instalado o link abre sem ?equipe: usa a última equipe escolhida nele.
+const ehApp = matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+try {
+  if (ehApp && !estado.equipe) estado.equipe = localStorage.getItem("equipe") || "";
+  if (estado.equipe) localStorage.setItem("equipe", estado.equipe);
+} catch {}
+$("#equipeSel").addEventListener("change", () => { try { localStorage.setItem("equipe", estado.equipe); } catch {} });
+
+// app instalável: registra o service worker (só funciona em https ou localhost)
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
+}
 
 (function initDatas() {
   const hoje = new Date();

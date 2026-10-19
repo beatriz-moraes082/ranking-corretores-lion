@@ -1,0 +1,17 @@
+{
+  "name": "Elite Lion · Ranking de Performance",
+  "short_name": "Elite Lion",
+  "description": "Ranking, funil e perfil dos corretores da Lion Negócios Imobiliários, ao vivo do Supremo CRM.",
+  "lang": "pt-BR",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#e7e6e2",
+  "theme_color": "#e7e6e2",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
