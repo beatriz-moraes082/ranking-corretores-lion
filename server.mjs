@@ -9,7 +9,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fetchLeadsPorPeriodo, fetchVendidos } from "./src/supremo.mjs";
+import { fetchLeadsPorPeriodo, fetchVendidos, statusLimite } from "./src/supremo.mjs";
 import { agregar, escanearParados, agregarEvolucao } from "./src/aggregate.mjs";
 import { criarArmazem } from "./src/armazem.mjs";
 
@@ -40,21 +40,25 @@ if (!TOKEN || TOKEN.includes("cole_seu_token")) {
   process.exit(1);
 }
 
-// --- Dados: duas bases e tudo calculado a partir delas ---
-// O Supremo bloqueia (HTTP 429) quando recebe consultas demais. Antes, ranking,
-// leads parados e evolução faziam buscas separadas que se sobrepunham (~350 páginas
-// por hora). Agora o servidor só baixa DUAS bases de leads e calcula tudo nelas:
-//   - mês atual (dia 1 até hoje), renovada a cada BASE_TTL (30 min)
-//   - mês anterior inteiro, renovada a cada 6 h (muda pouco)
-// mais a lista de vendidos (a cada 2 h). Ranking, semana, leads parados e evolução
-// saem dessas bases sem nova consulta. Fica em torno de 80 páginas por hora.
+// --- Dados: duas bases, atualizadas por AGENDA, e tudo calculado a partir delas ---
+// Agenda (horário de Maceió, segunda a sábado, 8h às 19h):
+//   - leads de HOJE: a cada 30 min (1-2 páginas), juntados à base do mês
+//   - mês atual inteiro: às 8h, 12h e 17h (atualiza situação, funil e parados)
+//   - vendidos: junto com a das 17h (e se faltar)
+//   - mês anterior: uma vez por dia
+//   - fora do horário e no domingo: nada (exceto se faltar alguma base)
+// Bloqueio (429): a busca para na hora e nada sai por 30-60 min.
+// O Supremo bloqueia (HTTP 429) quando recebe consultas demais. Ranking, semana,
+// leads parados e evolução saem das duas bases (mês atual e anterior) sem nova
+// consulta. Com a agenda, fica em torno de 200 páginas por dia.
 const CACHE_DIR = join(__dirname, ".cache");
 const CACHE_FILE = join(CACHE_DIR, "dados-v3.json");
 // BASE_TTL_MIN (e não o antigo CACHE_TTL_MIN=15 que ainda está no Render): renovar
 // o mês atual mais vezes que isso volta a encostar no limite do Supremo.
-const BASE_TTL = (Number(process.env.BASE_TTL_MIN) || 30) * 60 * 1000;
-const ANTERIOR_TTL = 6 * 60 * 60 * 1000;
-const VENDIDOS_TTL = 2 * 60 * 60 * 1000;
+const HOJE_A_CADA = (Number(process.env.BASE_TTL_MIN) || 30) * 60 * 1000; // leads de hoje
+const HORARIOS_MES = [8, 12, 17];   // atualizações completas do mês atual
+const EXPEDIENTE = [8, 19];         // das 8h às 19h
+const ANTERIOR_TTL = 6 * 60 * 60 * 1000; // períodos avulsos (fora das bases)
 const MAX_PERIODOS = 12; // períodos fora das bases (raros) ficam num cache próprio
 
 let baseAtual = null;    // { ts, inicio, fim, rows }
@@ -66,7 +70,7 @@ const emVoo = new Map();   // dedupe de buscas simultâneas
 // Só os campos que o painel usa (sem "interesses"/"anotacoes", que são textos longos).
 const CAMPOS = ["nome_pessoa", "telefone_pessoa", "nome_origem", "data_captura", "data_qualificado", "data_com_corretor",
   "data_ultima_interacao", "nome_qualificador", "nome_corretor", "nome_status", "etapa", "nome_etapa",
-  "data_vendido_perdido", "nome_situacao", "valor_vendido", "motivo_perda"];
+  "data_vendido_perdido", "nome_situacao", "valor_vendido", "motivo_perda", "id"];
 const enxugar = (rows) => rows.map((r) => Object.fromEntries(CAMPOS.map((k) => [k, r[k] ?? null])));
 
 function faixas(hoje = new Date()) {
@@ -125,16 +129,38 @@ function umaVez(chave, fn) {
   return p;
 }
 const baseValida = (b, faixa) => !!b && b.inicio === faixa.inicio;
+// Horário atual na agenda: em expediente? qual o último horário completo do mês?
+function momento(agora = new Date()) {
+  const h = agora.getHours() + agora.getMinutes() / 60;
+  const expediente = agora.getDay() !== 0 && h >= EXPEDIENTE[0] && h < EXPEDIENTE[1];
+  const passou = HORARIOS_MES.filter((x) => h >= x);
+  return { hoje: isoDate(agora), expediente, slot: passou.length ? `${isoDate(agora)}@${passou.at(-1)}` : null, slotHora: passou.at(-1) };
+}
 function buscarBase(qual) {
   return umaVez(`base:${qual}`, async () => {
     const faixa = faixas()[qual];
     const { rows } = await fetchLeadsPorPeriodo(TOKEN, faixa.inicio, faixa.fim);
-    const base = { ts: Date.now(), ...faixa, rows: enxugar(rows) };
+    // slot: marca qual horário da agenda esta busca completa já atendeu
+    const base = { ts: Date.now(), tsHoje: Date.now(), slot: momento().slot, dia: momento().hoje, ...faixa, rows: enxugar(rows) };
     if (qual === "atual") baseAtual = base; else baseAnterior = base;
     memo.clear();
     console.log(`  [dados] base ${qual} atualizada: ${rows.length} leads`);
     persistir();
     return base;
+  });
+}
+// Só os leads de hoje (1-2 páginas), trocando os de hoje que já estavam na base.
+function buscarHoje() {
+  return umaVez("base:hoje", async () => {
+    const hoje = momento().hoje;
+    const { rows } = await fetchLeadsPorPeriodo(TOKEN, hoje, hoje);
+    if (!baseAtual) return;
+    baseAtual.rows = baseAtual.rows.filter((r) => dia(r.data_captura) !== hoje).concat(enxugar(rows));
+    baseAtual.fim = hoje;
+    baseAtual.tsHoje = Date.now();
+    memo.clear();
+    console.log(`  [dados] leads de hoje atualizados: ${rows.length}`);
+    persistir();
   });
 }
 function buscarVendidos() {
@@ -156,17 +182,32 @@ async function garantirVendidos() {
 }
 // Renova o que venceu, em sequência (é o único lugar que consulta o Supremo
 // periodicamente). Ordem: o que a TV mostra primeiro.
+// A agenda roda a cada 5 min, mas só consulta o Supremo quando algo está na hora.
 let renovando = false;
 async function renovar() {
-  if (renovando) return;
+  if (renovando || statusLimite().pausado) return;
   renovando = true;
   try {
     const f = faixas();
-    if (!baseValida(baseAtual, f.atual) || !fresco(baseAtual, BASE_TTL)) await buscarBase("atual");
-    if (!fresco(vendidosCache, VENDIDOS_TTL)) await buscarVendidos();
-    if (!baseValida(baseAnterior, f.anterior) || !fresco(baseAnterior, ANTERIOR_TTL)) await buscarBase("anterior");
+    const m = momento();
+    // 1) falta alguma base (servidor acabou de subir ou virou o mês): busca já
+    if (!baseValida(baseAtual, f.atual)) await buscarBase("atual");
+    if (!vendidosCache) await buscarVendidos();
+    if (!baseValida(baseAnterior, f.anterior)) await buscarBase("anterior");
+    // 2) mês atual completo nos horários da agenda (8h, 12h, 17h), uma vez cada
+    if (m.expediente && m.slot && baseAtual.slot !== m.slot) {
+      await buscarBase("atual");
+      if (m.slotHora === 17) await buscarVendidos();
+    }
+    // 3) leads de hoje a cada 30 min no expediente
+    else if (m.expediente && Date.now() - (baseAtual.tsHoje || baseAtual.ts) >= HOJE_A_CADA) await buscarHoje();
+    // 4) mês anterior uma vez por dia: fora do expediente se o servidor estiver
+    //    acordado; senão, junto da janela das 17h
+    const anteriorDeOntem = (baseAnterior.dia || "") < m.hoje;
+    if (anteriorDeOntem && (!m.expediente || m.slotHora === 17)) await buscarBase("anterior");
+    if (Date.now() - vendidosCache.ts > 24 * 60 * 60 * 1000) await buscarVendidos();
   } catch (e) {
-    console.error("  [dados] falha ao renovar:", e.message);
+    console.error("  [dados] agenda:", e.message);
   } finally {
     renovando = false;
   }
@@ -210,7 +251,7 @@ async function calcularRanking(inicio, fim) {
     }
     const vendidos = (await garantirVendidos()).rows;
     data = agregar({ leadsPeriodo, vendidos, periodo: { inicio: new Date(`${inicio}T00:00:00`), fim: new Date(`${fim}T23:59:59`) }, agora: new Date() });
-    data.geradoEm = new Date(Math.min(baseAtual?.ts || Date.now(), Date.now())).toISOString();
+    data.geradoEm = new Date(baseAtual ? Math.max(baseAtual.ts, baseAtual.tsHoje || 0) : Date.now()).toISOString();
     if (cobre(inicio, fim)) memo.set(chave, data);
     else { avulsos.set(`${inicio}|${fim}`, { ts: Date.now(), data }); persistir(); }
   }
@@ -248,7 +289,7 @@ function evolucaoAtual() {
   if (memo.has("evolucao")) return memo.get("evolucao");
   if (!baseAtual || !baseAnterior || !vendidosCache) return null;
   const data = agregarEvolucao({ leads: [...baseAnterior.rows, ...baseAtual.rows], vendidos: vendidosCache.rows, janelas: janelasEvolucao() });
-  data.geradoEm = new Date(baseAtual.ts).toISOString();
+  data.geradoEm = new Date(Math.max(baseAtual.ts, baseAtual.tsHoje || 0)).toISOString();
   memo.set("evolucao", data);
   return data;
 }

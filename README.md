@@ -131,10 +131,28 @@ variável `ALERTA_DIAS` no `.env`.
 |----------|--------|-----------|
 | `SUPREMO_TOKEN` | — | **Obrigatório.** Token JWT da API do Supremo CRM. |
 | `PORT` | `8787` | Porta do servidor. |
-| `BASE_TTL_MIN` | `30` | Minutos até baixar de novo a base do mês atual (o mês anterior é a cada 6 h). |
+| `BASE_TTL_MIN` | `30` | Minutos entre as buscas dos leads de hoje, no expediente. |
 | `ALERTA_DIAS` | `45` | Janela (dias) da varredura de leads parados. |
 | `EQUIPES_JSON` | — | Opcional. Equipes em JSON (substitui o `equipes.json`). |
 | `KV_URL` | — | Recomendado no Render. URL do Key Value (Redis) onde o cache sobrevive às publicações. |
+
+### Agenda de consultas ao Supremo
+
+O Supremo bloqueia (HTTP 429) quando recebe consultas demais, então o servidor segue
+uma agenda (horário de Maceió) em vez de baixar tudo o tempo todo:
+
+| O que | Quando |
+|---|---|
+| Leads de hoje (1-2 páginas) | a cada 30 min, de segunda a sábado, das 8h às 19h |
+| Mês atual inteiro | às 8h, 12h e 17h |
+| Vendidos | junto com a das 17h |
+| Mês anterior | uma vez por dia |
+| Noite e domingo | nada |
+
+Ranking, semana, funil, leads parados e evolução são calculados dessas bases, sem
+nova consulta (~200 páginas por dia). Se vier um 429, a busca para na hora e nenhuma
+consulta sai por 30 min (60 min se repetir). Lead novo aparece em até 30 min; mudança
+de situação de lead mais antigo aparece na próxima atualização do mês.
 
 ### Cache persistente (Render Key Value)
 

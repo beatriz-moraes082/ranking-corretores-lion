@@ -16,16 +16,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const MIN_INTERVALO_MS = 1050;
 let ultimaChamada = 0;
 let fila = Promise.resolve();
-// Freio global: quando o Supremo responde 429, TODA a fila para por um tempo que
-// dobra a cada 429 seguido (30s, 60s, 120s... até 5 min) e zera no primeiro
-// sucesso. Insistir a cada segundo mantém o bloqueio ativo indefinidamente.
+// Freio global: quando o Supremo responde 429, a busca para na hora (não insiste)
+// e nenhuma consulta sai por 30 min; se o 429 se repetir, 60 min. Zera no primeiro
+// sucesso. Insistir mantém o bloqueio ativo indefinidamente.
 let pausaAte = 0;
 let pausaAtual = 0;
-const PAUSA_MIN = 30_000, PAUSA_MAX = 5 * 60_000;
+const PAUSA_MIN = 30 * 60_000, PAUSA_MAX = 60 * 60_000;
 function registrar429() {
   pausaAtual = pausaAtual ? Math.min(PAUSA_MAX, pausaAtual * 2) : PAUSA_MIN;
   pausaAte = Date.now() + pausaAtual;
-  console.warn(`  [supremo] 429: pausando consultas por ${Math.round(pausaAtual / 1000)}s`);
+  console.warn(`  [supremo] 429: pausando consultas por ${Math.round(pausaAtual / 60000)} min`);
 }
 function registrarSucesso() {
   pausaAtual = 0;
@@ -33,7 +33,13 @@ function registrarSucesso() {
 export function statusLimite() {
   return { pausado: Date.now() < pausaAte, retomaEm: pausaAte };
 }
+export class BloqueioSupremo extends Error {}
 function throttle() {
+  if (Date.now() < pausaAte) {
+    const e = new BloqueioSupremo(`Supremo bloqueado; nova tentativa após ${new Date(pausaAte).toLocaleTimeString("pt-BR")}`);
+    e.bloqueio = true;
+    return Promise.reject(e);
+  }
   const anterior = fila;
   let liberar;
   fila = new Promise((r) => (liberar = r));
@@ -60,11 +66,13 @@ async function fetchPage(path, token, { retries = 10 } = {}) {
         signal: AbortSignal.timeout(30000),
       });
       if (res.status === 429) {
-        // Bloqueio por excesso de consultas: aciona o freio global (a própria
-        // fila espera antes da próxima tentativa). Retry-After tem prioridade.
+        // Bloqueio por excesso de consultas: aciona o freio global e desiste desta
+        // busca (a agenda do servidor tenta de novo depois da pausa).
         const ra = Number(res.headers.get("retry-after"));
         if (ra > 0) { pausaAte = Date.now() + ra * 1000; } else registrar429();
-        throw new Error(`HTTP 429 em ${url}`);
+        const e = new Error(`HTTP 429 em ${url}`);
+        e.bloqueio = true;
+        throw e;
       }
       if (res.status >= 500) {
         await sleep(Math.min(15000, 3000 + 2000 * attempt));
@@ -76,6 +84,7 @@ async function fetchPage(path, token, { retries = 10 } = {}) {
       registrarSucesso();
       return json;
     } catch (err) {
+      if (err.bloqueio) throw err; // 429: não insiste
       lastErr = err;
       if (!String(err.message).startsWith("HTTP")) await sleep(400 * (attempt + 1));
     }
