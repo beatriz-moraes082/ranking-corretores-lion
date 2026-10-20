@@ -1064,7 +1064,7 @@ function renderTV() {
       <span class="tvb-rod-txt">${t.rodape || ""}</span>
       <nav class="tvb-nav">
         ${telas.map((x, i) => `<button class="tvb-nav-it ${i === estado.tvIdx ? "ativo" : ""}" data-tv="${i}"><i>${i === estado.tvIdx ? `<u style="animation-duration:${TV_SEG}s"></u>` : ""}</i>${x.nome}</button>`).join("")}
-        <button class="tvb-sair" id="tvSair">Painel completo →</button>
+        <button class="tvb-sair" id="tvSair" type="button">Abrir painel completo <span class="seta" aria-hidden="true">→</span></button>
       </nav>
     </footer>
   </div>`;
