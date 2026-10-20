@@ -349,8 +349,8 @@ td.cx.gargalo b { color: var(--red); }
 .fn-ref-row td { background: color-mix(in srgb, var(--gold) 9%, var(--surface-solid)) !important; }
 :root[data-theme="dark"] .fn-ref-row td { background: color-mix(in srgb, var(--gold) 9%, #12171f) !important; }
 tr.clicavel { cursor: pointer; }
-tr.sel td { background: var(--surface-2); }
-tr.sel td:first-child { box-shadow: inset 4px 0 0 var(--gold); }
+tr.selecionado td { background: var(--surface-2); }
+tr.selecionado td:first-child { box-shadow: inset 4px 0 0 var(--gold); }
 
 /* leads parados */
 .parados-resumo { display: flex; align-items: center; gap: 26px; flex-wrap: wrap; margin-bottom: 14px; }
@@ -426,6 +426,42 @@ tr.sel td:first-child { box-shadow: inset 4px 0 0 var(--gold); }
   .topbar { position: static; }
   thead th.hide-sm, tbody td.hide-sm { display: none; }
 }
+
+
+/* ---------- popup de explicação ---------- */
+.fn-tab td.cx-explica { cursor: help; }
+.fn-tab td.cx-explica:hover b { text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 4px; }
+.btn-ajuda { margin-left: auto; border: 1px solid var(--line); background: var(--surface); color: var(--txt); font-family: var(--font-body); font-weight: 700; font-size: 12.5px; padding: 6px 12px; border-radius: 20px; cursor: pointer; }
+.btn-ajuda:hover { border-color: var(--gold); }
+.popup { border: 0; padding: 0; background: transparent; max-width: min(560px, calc(100vw - 32px)); width: 100%; margin: auto; color: var(--txt); }
+.popup::backdrop { background: rgba(10, 10, 9, 0.55); backdrop-filter: blur(2px); }
+.popup[open] .pp { animation: ppEntra 0.22s cubic-bezier(0.22, 1, 0.36, 1); }
+@keyframes ppEntra { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: none; } }
+.pp { position: relative; background: var(--surface-solid); border: 1px solid var(--line); border-radius: 20px; padding: 26px 28px 22px; box-shadow: var(--shadow); font-family: var(--font-body); }
+.pp-x { position: absolute; top: 14px; right: 14px; width: 34px; height: 34px; border-radius: 50%; border: 0; background: var(--surface-2); color: var(--txt); font-size: 20px; line-height: 1; cursor: pointer; }
+.pp-rot { font-size: 12px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--gold); }
+.pp h3 { font-family: var(--font-disp); font-weight: 800; font-size: 20px; margin: 6px 40px 14px 0; line-height: 1.25; }
+.pp-num { font-size: 16px; line-height: 1.5; margin-bottom: 16px; }
+.pp-num b { font-family: var(--font-disp); font-weight: 900; font-size: 22px; }
+.pp-barras { display: grid; gap: 10px; margin-bottom: 16px; }
+.pp-barra { display: grid; grid-template-columns: 130px 1fr 56px; align-items: center; gap: 12px; font-size: 13.5px; }
+.pp-barra span { color: var(--txt-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-barra i { height: 10px; border-radius: 6px; background: var(--surface-2); overflow: hidden; }
+.pp-barra u { display: block; height: 100%; border-radius: 6px; text-decoration: none; background: var(--txt-dim); }
+.pp-barra.eu u { background: var(--gold); }
+.pp-barra b { font-family: var(--font-disp); font-weight: 800; text-align: right; }
+.pp p { font-size: 14.5px; line-height: 1.55; margin-top: 10px; }
+.pp-bom { color: var(--green); }
+.pp-ruim, .pp-ruim-txt { color: var(--red); }
+.pp-aviso { color: var(--txt-dim); }
+.pp-garg { padding: 10px 14px; border-radius: 12px; background: color-mix(in srgb, var(--red) 12%, transparent); }
+.pp-nota { color: var(--txt-dim); font-size: 13px !important; }
+.pp-nota b { color: var(--txt); }
+.pp-lista { margin: 4px 0 0 18px; display: grid; gap: 8px; font-size: 14.5px; line-height: 1.5; }
+.pp-acoes { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; flex-wrap: wrap; }
+.btn-sec { border: 1px solid var(--line); background: transparent; color: var(--txt); font-weight: 700; padding: 9px 15px; border-radius: 9px; cursor: pointer; font-family: var(--font-disp); }
+@media (max-width: 520px) { .pp { padding: 22px 18px 18px; } .pp-barra { grid-template-columns: 90px 1fr 48px; } }
+@media (prefers-reduced-motion: reduce) { .popup[open] .pp { animation: none; } }
 
 /* =====================================================================
    MODO TV — estilo "galeria clara": off-white da Lion, tipografia fina,

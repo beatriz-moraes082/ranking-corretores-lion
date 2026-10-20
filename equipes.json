@@ -1,1 +1,75 @@
-[]
+[
+  {
+    "id": "fenix",
+    "nome": "Equipe Fênix",
+    "gerente": "Glacia Maria Silveira Araujo Lima",
+    "corretores": [
+      "Sabrina Nascimento Ramos de Lima",
+      "Vinicius allan",
+      "Alexandria Farias de Menezes",
+      "CARLOS HENRIQUE GOMES PORANGABA",
+      "Glacia Maria Silveira Araujo Lima",
+      "Kaike Lins Fernandes Silva",
+      "Lucas Matheus de Souza Martins",
+      "Manuela de Souza Lourenço",
+      "Pedro Bertulino da Silva",
+      "Rafael Cardoso de Almeida",
+      "Rafael da Silva Pereira"
+    ]
+  },
+  {
+    "id": "select",
+    "nome": "Equipe Select",
+    "gerente": "Luiz Fernandes Costa da Silva",
+    "corretores": [
+      "ADRIANO DE SOUZA ALEIXO",
+      "ALEXANDRE ALVES",
+      "Gilberto Gadelha de Carvalho Junior",
+      "HUGO FELIPE DA COSTA VIANA SENA",
+      "LUIZ FERNANDES COSTA DA SILVA",
+      "PABLLO RICHARD DO LIVRAMENTO CAVALCANTE",
+      "RODRIGO DE LIMA VIEIRA ROCHA"
+    ]
+  },
+  {
+    "id": "gideao300",
+    "nome": "Gideão300",
+    "gerente": "Sávio Weslley Feijó Teixeira",
+    "corretores": [
+      "EVANDRO CONRADO DA SILVA",
+      "Fernanda Marcela de Souza",
+      "JOAO PEDRO MOURA LINS",
+      "KAUAN CHICUTA DOS SANTOS",
+      "LEONARDO HENRICO NUNES DE ARAÚJO BEZERRA",
+      "MANOEL ANDRÉ DE LIMA NETO",
+      "MARIA JOSÉ BENTO DA SILVA",
+      "MARIANA ROGÉRIO DOS SANTOS",
+      "RODRIGO ANTUNES CALDAS RAMOS",
+      "SÁVIO WESLLEY FEIJÓ TEIXEIRA",
+      "SÉRGIO EWERTON CONCEIÇÃO DE LIMA",
+      "Thiago Rocha Correa de Melo"
+    ]
+  },
+  {
+    "id": "surreal",
+    "nome": "Equipe Surreal",
+    "gerente": "Sérgio Lima",
+    "corretores": [
+      "Amanda da Rocha",
+      "Eliziane Tássyla Nascimento da Silva",
+      "Gilson Ramos dos Santos",
+      "GISELLY DOS SANTOS LEITE",
+      "JADSON FELIPE PEREIRA MATIAS",
+      "JOSÉ EDSON DOS SANTOS AMORIM JÚNIOR",
+      "José Fernando Batista da Silva",
+      "JOSÉ PAULINO DA SILVA NETO",
+      "LINDERLEY XAVIER VIEIRA",
+      "LUCIANO FERREIRA DOS SANTOS",
+      "Luiz Henrique dos Santos Correia",
+      "MARIANA ROGÉRIO DOS SANTOS",
+      "Moab Cirino Pereira",
+      "Patrícia Danielly Ferreira Tenório",
+      "THIAGO SOUZA DOS SANTOS"
+    ]
+  }
+]

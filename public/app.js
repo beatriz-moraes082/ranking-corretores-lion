@@ -685,6 +685,7 @@ function renderFunil(d) {
       <span><i class="lg-r">▼</i> abaixo de ${refTxt}</span>
       <span><i class="lg-garg"></i> gargalo: maior queda vs ${refTxt}</span>
       <span><i class="lg-fraco"></i> menos de ${MIN_GARGALO} leads na etapa anterior</span>
+      <button class="btn-ajuda" id="ajudaComparativo" type="button">? Como ler esta tabela</button>
     </div>`;
   const maxQ = Math.max(1, ...corretores.map((x) => x.funil[0]));
   const celula = (f, i, ref, garg) => {
@@ -694,14 +695,14 @@ function renderFunil(d) {
       const dv = t - tr;
       d = `<small class="${dv >= 0 ? "g" : "r"}">${dv >= 0 ? "▲" : "▼"} ${pp(Math.abs(dv)).replace("+", "")}</small>`;
     }
-    return `<td class="cx ${garg ? "gargalo" : fraco ? "fraco" : ""}" title="${num(f[i])} de ${num(f[i - 1])}"><b>${pct(t)}</b>${d}</td>`;
+    return `<td class="cx cx-explica ${garg ? "gargalo" : fraco ? "fraco" : ""}" data-etapa="${i}" title="Clique para entender este número"><b>${pct(t)}</b>${d}</td>`;
   };
   const linhaRef = `<tr class="fn-ref-row"><td><div class="rk"><span class="rk-av ref">∑</span><span><span class="rk-nome">${esc(grupo)}</span><br><span class="rk-sub">referência</span></span></div></td>
     <td class="cx"><b>${num(fGrupo[0])}</b></td>${CURTO.slice(1).map((_, i) => `<td class="cx"><b>${pct(taxa(fGrupo, i + 1))}</b></td>`).join("")}
     <td class="cx"><b>${pct(fGrupo[0] ? (100 * fGrupo[4]) / fGrupo[0] : null)}</b></td><td></td></tr>`;
   const linhas = [...corretores].sort((a, b) => b.funil[0] - a.funil[0]).map((x) => {
     const g = gargalo(x.funil, fGrupo);
-    return `<tr class="clicavel ${x.nome === estado.corretorSel ? "sel" : ""}" data-nome="${esc(x.nome)}">
+    return `<tr class="clicavel ${x.nome === estado.corretorSel ? "selecionado" : ""}" data-nome="${esc(x.nome)}">
       <td><div class="rk">${avatar(x.nome, idxCor[x.nome] ?? 0)}<span class="rk-nome">${esc(x.nome.trim())}</span></div></td>
       <td class="cx"><b>${num(x.funil[0])}</b><span class="mini-bar"><i style="width:${(x.funil[0] / maxQ) * 100}%"></i></span></td>
       ${CURTO.slice(1).map((_, i) => celula(x.funil, i + 1, fGrupo, g && g.i === i + 1)).join("")}
@@ -713,11 +714,15 @@ function renderFunil(d) {
   wrap.className = "tabela-wrap rolavel";
   wrap.innerHTML = `<table class="fn-tab"><thead><tr><th>Corretor</th><th>Qualificados</th>${CURTO.slice(1).map((e, i) => `<th>${CURTO[i]} <span>→</span><br>${e}</th>`).join("")}<th>Qualif. <span>→</span><br>Venda</th><th>Gargalo</th></tr></thead>
     <tbody>${linhaRef}${linhas || `<tr><td colspan="8" class="vazio">Sem leads no período.</td></tr>`}</tbody></table>`;
-  wrap.querySelectorAll("tr[data-nome]").forEach((tr) => tr.addEventListener("click", () => {
-    estado.corretorSel = tr.dataset.nome;
-    render();
-    window.scrollTo({ top: 0, behavior: "smooth" });
+  const abrirFunil = (nome) => { estado.corretorSel = nome; render(); window.scrollTo({ top: 0, behavior: "smooth" }); };
+  wrap.querySelectorAll("tr[data-nome]").forEach((tr) => tr.addEventListener("click", (ev) => {
+    const cel = ev.target.closest(".cx-explica");
+    const x = corretores.find((c) => c.nome === tr.dataset.nome);
+    // clique numa porcentagem explica o número; no resto da linha abre o funil
+    if (cel && x) return explicarPassagem({ x, i: Number(cel.dataset.etapa), ref: fGrupo, refTxt, grupo, etapas, onFunil: () => abrirFunil(x.nome) });
+    abrirFunil(tr.dataset.nome);
   }));
+  sec2.querySelector("#ajudaComparativo").addEventListener("click", () => explicarTabela(refTxt));
   sec2.appendChild(wrap);
   c.appendChild(sec2);
 
@@ -791,6 +796,77 @@ async function carregarEvolucao() {
   if (estado.data && estado.view === "funil") render();
 }
 
+
+/* ---------- popups de explicação do comparativo ---------- */
+// O "▼ 14 p.p." sozinho confunde; clicar numa porcentagem abre esta explicação
+// em linguagem simples, com os números de verdade por trás da taxa.
+function abrirPopup(html) {
+  let dlg = document.getElementById("popupExplica");
+  if (!dlg) {
+    dlg = document.createElement("dialog");
+    dlg.id = "popupExplica";
+    dlg.className = "popup";
+    dlg.addEventListener("click", (e) => { if (e.target === dlg || e.target.closest("[data-fechar]")) dlg.close(); });
+    document.body.appendChild(dlg);
+  }
+  dlg.innerHTML = html;
+  dlg.showModal();
+  return dlg;
+}
+const plural2 = (n, um, varios) => `${num(n)} ${n === 1 ? um : varios}`;
+// no popup, sempre 1 casa decimal, pra conta "a − b = c p.p." fechar
+const pct1 = (v) => (v == null ? "—" : `${(Math.round(v * 10) / 10).toLocaleString("pt-BR")}%`);
+
+function explicarPassagem({ x, i, ref, refTxt, grupo, etapas, onFunil }) {
+  const nome = esc(nomeCurtoTV(x.nome));
+  const de = etapas[i - 1], para = etapas[i];
+  const base = x.funil[i - 1], passou = x.funil[i];
+  const t = taxa(x.funil, i), tr = taxa(ref, i);
+  const fraco = base < MIN_GARGALO;
+  const g = gargalo(x.funil, ref);
+  const deCem = (v) => (v == null ? "—" : Math.round(v));
+  let veredito;
+  if (t == null) veredito = `<p>${nome} ainda não tem nenhum lead em <b>${de}</b> neste período, então não dá pra calcular a passagem.</p>`;
+  else if (fraco) veredito = `<p class="pp-aviso">Com só ${plural2(base, "lead", "leads")} em ${de}, ainda é cedo pra tirar conclusão: um único lead muda muito a porcentagem.</p>`;
+  else if (tr != null) {
+    const dv = Math.round(Math.abs(t - tr) * 10) / 10;
+    const dvTxt = dv.toLocaleString("pt-BR");
+    veredito = t >= tr
+      ? `<p class="pp-bom">▲ Está <b>${dvTxt} pontos acima</b> de ${refTxt}. Pra cada 100 leads nessa etapa, ${nome} faz cerca de ${deCem(t - tr)} a mais avançarem.</p>`
+      : `<p class="pp-ruim">▼ Está <b>${dvTxt} pontos abaixo</b> de ${refTxt}. Pra cada 100 leads nessa etapa, cerca de ${deCem(tr - t)} a menos avançam com ${nome}.</p>`;
+  }
+  const barra = (rotulo, v, cls) => `<div class="pp-barra ${cls}"><span>${rotulo}</span><i><u style="width:${v == null ? 0 : Math.max(1, v)}%"></u></i><b>${pct1(v)}</b></div>`;
+  abrirPopup(`<div class="pp">
+    <button class="pp-x" data-fechar aria-label="Fechar">×</button>
+    <div class="pp-rot">${de} → ${para}</div>
+    <h3>${esc(x.nome.trim())}</h3>
+    <div class="pp-num"><b>${num(passou)}</b> de <b>${num(base)}</b> ${base === 1 ? "lead" : "leads"} que chegaram em ${de} ${passou === 1 ? "avançou" : "avançaram"} para ${para}</div>
+    <div class="pp-barras">${barra(nome, t, "eu")}${barra(esc(grupo), tr, "ref")}</div>
+    ${veredito}
+    ${g && g.i === i ? `<p class="pp-garg">Este é o <b>gargalo</b> de ${nome}: a passagem em que ele mais fica abaixo de ${refTxt}.</p>` : ""}
+    <p class="pp-nota"><b>"p.p." = pontos percentuais.</b> É só a diferença entre as duas porcentagens: ${tr == null || t == null ? "por exemplo, 14% − 0% = 14 p.p." : `${pct1(Math.max(t, tr))} − ${pct1(Math.min(t, tr))} = ${(Math.round(Math.abs(t - tr) * 10) / 10).toLocaleString("pt-BR")} p.p.`}</p>
+    <p class="pp-nota">A etapa só conta quando a situação do lead é atualizada no Supremo.</p>
+    <div class="pp-acoes"><button class="btn" id="ppFunil" type="button">Ver funil de ${nome}</button><button class="btn-sec" data-fechar type="button">Fechar</button></div>
+  </div>`).querySelector("#ppFunil").addEventListener("click", () => { document.getElementById("popupExplica").close(); onFunil(); });
+}
+
+function explicarTabela(refTxt) {
+  abrirPopup(`<div class="pp">
+    <button class="pp-x" data-fechar aria-label="Fechar">×</button>
+    <div class="pp-rot">Comparativo</div>
+    <h3>Como ler esta tabela</h3>
+    <ol class="pp-lista">
+      <li><b>Cada coluna é uma passagem</b> do funil, como Qualificado → Agendamento/Crédito.</li>
+      <li><b>A porcentagem grande</b> é quantos leads do corretor passaram de uma etapa pra outra. Ex.: 7,5% = de cada 100 leads qualificados, 7 ou 8 chegaram em Agendamento/Crédito.</li>
+      <li><b>A linha de cima (∑)</b> é a referência: o resultado de ${refTxt} inteira.</li>
+      <li><b>O número pequeno com ▲ ou ▼</b> compara o corretor com a referência, em <b>pontos percentuais (p.p.)</b>, que é só a diferença entre as duas porcentagens. Ex.: 0% contra 14% = <span class="pp-ruim-txt">▼ 14 p.p.</span></li>
+      <li><b>Célula vermelha</b> = o gargalo do corretor, a passagem em que ele mais fica abaixo de ${refTxt}.</li>
+      <li><b>Número apagado</b> = menos de ${MIN_GARGALO} leads na etapa: pouco pra tirar conclusão.</li>
+    </ol>
+    <p class="pp-nota">Clique numa porcentagem pra ver a explicação daquele número. Clique no nome do corretor pra abrir o funil dele.</p>
+    <div class="pp-acoes"><button class="btn" data-fechar type="button">Entendi</button></div>
+  </div>`);
+}
 /* ---------- modo TV ---------- */
 // O link principal abre aqui: uma pergunta por tela, telas que passam sozinhas.
 // Estilo "galeria clara": fundo off-white da Lion, tipografia fina, linhas finas e
