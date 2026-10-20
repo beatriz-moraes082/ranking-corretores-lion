@@ -301,6 +301,13 @@ const server = createServer(async (req, res) => {
       return res.end(JSON.stringify(data));
     }
 
+    // Equipes vêm do equipes.json, sem consultar o Supremo: assim aparecem mesmo
+    // quando a tela está usando dados guardados de antes das equipes existirem.
+    if (url.pathname === "/api/equipes") {
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-cache" });
+      return res.end(JSON.stringify(lerEquipes()));
+    }
+
     if (url.pathname === "/api/evolucao") {
       // Sai das mesmas bases do ranking; enquanto o mês anterior não chegou, 202.
       const data = evolucaoAtual();

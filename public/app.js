@@ -170,6 +170,7 @@ async function carregar({ soft = false } = {}) {
     const guardado = lerLocal("ranking");
     if (guardado?.chave === chave && guardado.data) {
       estado.data = guardado.data; estado.dataChave = chave; estado.semConexao = false;
+      if (estado.equipes) estado.data.equipes = estado.equipes;
       render();
     } else if (!soft) {
       estado.data = null;
@@ -182,6 +183,7 @@ async function carregar({ soft = false } = {}) {
     const data = await r.json();
     if (!r.ok) throw new Error(data.detalhe || data.erro || "Falha");
     estado.data = data; estado.dataChave = chave; estado.semConexao = false;
+    if (Array.isArray(data.equipes)) estado.equipes = data.equipes; else if (estado.equipes) data.equipes = estado.equipes;
     salvarLocal("ranking", { chave, data });
     clearTimeout(retentativa);
     render();
@@ -428,26 +430,41 @@ function renderPerfil(perfis) {
 
   const sec = document.createElement("section");
   sec.innerHTML = `<div class="secao-hd" style="margin-top:6px"><h2>Perfil comportamental</h2><span>${perfis.length} corretores · 6 dimensões, normalizadas entre os corretores do período · Volume, Movimentação e 1º contato ficam só aqui, fora do score</span></div>
-    ${grupos.length > 1 ? `<nav class="pf-atalhos">${grupos.map((g) => `<a href="#pf-${g.id}" class="pf-atalho">${esc(g.nome)} <b>${g.membros.length}</b></a>`).join("")}</nav>` : ""}`;
+    ${grupos.length > 1 ? `<nav class="pf-atalhos">${grupos.map((g) => `<a href="#pf-${g.id}" class="pf-atalho" data-abre="${g.id}">${esc(g.nome)} <b>${g.membros.length}</b></a>`).join("")}<button type="button" class="pf-atalho pf-todos" id="pfTodos">${grupos.every((g) => estado.pfAbertos?.has(g.id)) ? "Fechar todas" : "Abrir todas"}</button></nav>` : ""}`;
+  // Cada equipe é um tópico que abre e fecha; o que estava aberto continua aberto
+  // quando a tela se atualiza sozinha.
+  if (!estado.pfAbertos) estado.pfAbertos = new Set();
   for (const g of grupos) {
-    const bloco = document.createElement("div");
-    bloco.className = "pf-grupo";
-    bloco.id = `pf-${g.id}`;
-    if (g.nome) {
-      const media = g.membros.length ? Math.round(g.membros.reduce((s, p) => s + p.score, 0) / g.membros.length) : null;
-      const semLeads = g.total ? g.total - g.membros.length : 0;
-      bloco.innerHTML = `<div class="pf-hd">
-        <div><h3>${esc(g.nome)}</h3><span>${g.gerente ? `Gerente: ${esc(g.gerente)} · ` : ""}${plural(g.membros.length, "corretor com leads", "corretores com leads")} no período${semLeads > 0 ? ` · ${plural(semLeads, "sem leads", "sem leads")}` : ""}${g.sem ? " · não estão em nenhuma equipe cadastrada" : ""}</span></div>
+    const grid = `<div class="radar-grid">${g.membros.length ? g.membros.map((p) => radarCardHTML(p, idx.get(p.c.nome))).join("") : `<div class="vazio">Nenhum corretor desta equipe com leads no período.</div>`}</div>`;
+    if (!g.nome) { sec.insertAdjacentHTML("beforeend", grid); continue; }
+    const media = g.membros.length ? Math.round(g.membros.reduce((s, p) => s + p.score, 0) / g.membros.length) : null;
+    const semLeads = g.total ? g.total - g.membros.length : 0;
+    const aberto = grupos.length === 1 || estado.pfAbertos.has(g.id);
+    const avatares = g.membros.slice(0, 5).map((p) => `<span class="rk-av" style="background:linear-gradient(150deg,${corDe(idx.get(p.c.nome))},${corDe(idx.get(p.c.nome))}bb)" title="${esc(p.c.nome.trim())}">${iniciais(p.c.nome)}</span>`).join("");
+    const det = document.createElement("details");
+    det.className = "pf-grupo";
+    det.id = `pf-${g.id}`;
+    det.open = aberto;
+    det.innerHTML = `<summary class="pf-hd">
+        <span class="pf-seta" aria-hidden="true"></span>
+        <div class="pf-tit"><h3>${esc(g.nome)}</h3><span>${g.gerente ? `Gerente: ${esc(g.gerente)} · ` : ""}${plural(g.membros.length, "corretor com leads", "corretores com leads")} no período${semLeads > 0 ? ` · ${plural(semLeads, "sem leads", "sem leads")}` : ""}${g.sem ? " · não estão em nenhuma equipe cadastrada" : ""}</span></div>
+        <div class="pf-avs">${avatares}${g.membros.length > 5 ? `<span class="pf-mais">+${g.membros.length - 5}</span>` : ""}</div>
         ${media != null ? `<div class="pf-media"><b>${media}</b><span>score médio</span></div>` : ""}
-      </div>`;
-    }
-    const grid = document.createElement("div");
-    grid.className = "radar-grid";
-    grid.innerHTML = g.membros.length ? g.membros.map((p) => radarCardHTML(p, idx.get(p.c.nome))).join("") : `<div class="vazio">Nenhum corretor desta equipe com leads no período.</div>`;
-    bloco.appendChild(grid);
-    sec.appendChild(bloco);
+        <span class="pf-acao">${aberto ? "Fechar" : "Ver corretores"}</span>
+      </summary>${grid}`;
+    det.addEventListener("toggle", () => {
+      if (det.open) estado.pfAbertos.add(g.id); else estado.pfAbertos.delete(g.id);
+      det.querySelector(".pf-acao").textContent = det.open ? "Fechar" : "Ver corretores";
+    });
+    sec.appendChild(det);
   }
-  if (!perfis.length) sec.innerHTML += `<div class="vazio">Sem corretores com leads no período.</div>`;
+  if (!perfis.length) sec.insertAdjacentHTML("beforeend", `<div class="vazio">Sem corretores com leads no período.</div>`);
+  sec.querySelectorAll("[data-abre]").forEach((a) => a.addEventListener("click", () => { const d = sec.querySelector(`#pf-${a.dataset.abre}`); if (d) d.open = true; }));
+  sec.querySelector("#pfTodos")?.addEventListener("click", () => {
+    const abrir = !grupos.every((g) => estado.pfAbertos.has(g.id));
+    grupos.forEach((g) => (abrir ? estado.pfAbertos.add(g.id) : estado.pfAbertos.delete(g.id)));
+    renderPerfil(perfis);
+  });
   c.appendChild(sec);
 }
 
@@ -831,6 +848,16 @@ function renderFunil(d) {
   c.appendChild(sec4);
 }
 
+// Lista de equipes direto do servidor (não depende do Supremo).
+async function carregarEquipes() {
+  try {
+    const r = await fetch("/api/equipes", { signal: AbortSignal.timeout(15000) });
+    if (!r.ok) return;
+    estado.equipes = await r.json();
+    if (estado.data) { estado.data.equipes = estado.equipes; render(); }
+  } catch {}
+}
+
 async function carregarEvolucao() {
   try {
     const r = await fetch("/api/evolucao");
@@ -1196,7 +1223,8 @@ if ("serviceWorker" in navigator) {
 })();
 
 aplicarModo();
+carregarEquipes();
 carregar();
 carregarEvolucao();
 // auto-refresh para o modo TV
-setInterval(() => { carregar({ soft: true }); carregarEvolucao(); }, 3 * 60 * 1000);
+setInterval(() => { carregarEquipes(); carregar({ soft: true }); carregarEvolucao(); }, 3 * 60 * 1000);

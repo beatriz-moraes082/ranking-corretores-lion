@@ -237,18 +237,31 @@ tbody tr.lider td:first-child { box-shadow: inset 4px 0 0 var(--gold); }
 .pill.r { background: color-mix(in srgb, var(--red) 18%, transparent); color: var(--red); }
 
 /* ---------- Radar / perfil ---------- */
-/* perfil dividido por equipe */
-.pf-atalhos { display: flex; gap: 8px; flex-wrap: wrap; margin: -4px 0 8px; }
-.pf-atalho { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 20px; border: 1px solid var(--line); background: var(--surface); color: var(--txt); text-decoration: none; font-family: var(--font-disp); font-weight: 700; font-size: 13px; }
+/* perfil dividido por equipe: cada equipe é um tópico que abre e fecha */
+.pf-atalhos { display: flex; gap: 8px; flex-wrap: wrap; margin: -4px 0 12px; }
+.pf-atalho { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 20px; border: 1px solid var(--line); background: var(--surface); color: var(--txt); text-decoration: none; font-family: var(--font-disp); font-weight: 700; font-size: 13px; cursor: pointer; }
 .pf-atalho b { font-size: 11.5px; padding: 1px 8px; border-radius: 20px; background: var(--surface-2); color: var(--txt-dim); }
 .pf-atalho:hover { border-color: var(--gold); }
-.pf-grupo { margin-top: 34px; scroll-margin-top: 96px; }
-.pf-hd { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding-bottom: 14px; margin-bottom: 18px; border-bottom: 1px solid var(--line); }
-.pf-hd h3 { font-family: var(--font-disp); font-weight: 800; font-size: 21px; letter-spacing: -0.01em; }
-.pf-hd span { display: block; color: var(--txt-dim); font-size: 13px; margin-top: 4px; }
-.pf-media { text-align: right; }
-.pf-media b { display: block; font-family: var(--font-disp); font-weight: 900; font-size: 30px; line-height: 1; color: var(--gold); }
-.pf-media span { color: var(--txt-dim); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em; }
+.pf-todos { margin-left: auto; background: transparent; }
+.pf-grupo { margin-top: 12px; scroll-margin-top: 96px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card-grad); box-shadow: var(--shadow); overflow: hidden; }
+.pf-grupo > .radar-grid { padding: 4px 18px 20px; }
+.pf-hd { display: flex; align-items: center; gap: 16px; padding: 18px 22px; cursor: pointer; list-style: none; user-select: none; }
+.pf-hd::-webkit-details-marker { display: none; }
+.pf-hd:hover { background: var(--surface-2); }
+.pf-hd:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+.pf-seta { width: 10px; height: 10px; border-right: 2px solid var(--txt-dim); border-bottom: 2px solid var(--txt-dim); transform: rotate(-45deg); transition: transform 0.2s ease; flex-shrink: 0; margin-right: 2px; }
+.pf-grupo[open] .pf-seta { transform: rotate(45deg); }
+.pf-tit { flex: 1; min-width: 0; }
+.pf-tit h3 { font-family: var(--font-disp); font-weight: 800; font-size: 20px; letter-spacing: -0.01em; }
+.pf-tit span { display: block; color: var(--txt-dim); font-size: 13px; margin-top: 3px; }
+.pf-avs { display: flex; }
+.pf-avs .rk-av { width: 34px; height: 34px; font-size: 12px; margin-left: -8px; box-shadow: 0 0 0 2px var(--surface-solid); }
+.pf-mais { display: grid; place-items: center; width: 34px; height: 34px; margin-left: -8px; border-radius: 50%; background: var(--surface-2); color: var(--txt-dim); font-size: 11.5px; font-weight: 800; box-shadow: 0 0 0 2px var(--surface-solid); }
+.pf-media { text-align: right; min-width: 78px; }
+.pf-media b { display: block; font-family: var(--font-disp); font-weight: 900; font-size: 28px; line-height: 1; color: var(--gold); }
+.pf-media span { color: var(--txt-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+.pf-acao { font-family: var(--font-disp); font-weight: 700; font-size: 12.5px; color: var(--gold); white-space: nowrap; min-width: 96px; text-align: right; }
+@media (max-width: 780px) { .pf-avs, .pf-acao { display: none; } .pf-hd { padding: 16px; } .pf-grupo > .radar-grid { padding: 4px 12px 16px; } }
 .radar-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 18px; }
 .radar-card { border-radius: var(--radius); border: 1px solid var(--line); background: var(--card-grad); box-shadow: var(--shadow); padding: 20px; }
 .radar-hd { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
