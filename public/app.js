@@ -3,6 +3,7 @@ const $ = (s, r = document) => r.querySelector(s);
 // tons terrosos da identidade da Lion (avatares e radar)
 const PALETA = ["#a65b45", "#6f6e68", "#8c6a5c", "#4a4a46", "#b9836c", "#5d675e"];
 const num = (n) => (n || 0).toLocaleString("pt-BR");
+const plural = (n, um, varios) => `${num(n)} ${n === 1 ? um : varios}`;
 const brlK = (n) => {
   n = n || 0;
   if (n >= 1e6) return "R$ " + (n / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "M";
@@ -405,12 +406,45 @@ function radarCardHTML(p, i) {
 function renderPerfil(perfis) {
   const c = $("#conteudo");
   c.innerHTML = "";
+  const equipes = estado.data?.equipes || [];
+  const eqSel = equipeAtual();
+  const idx = new Map(perfis.map((p, i) => [p.c.nome, i])); // cor do radar = posição no ranking
+  const membrosDe = (e) => { if (!e._set) e._set = new Set(e.corretores.map(chave)); return perfis.filter((p) => e._set.has(chave(p.c.nome))); };
+
+  // Grupos: uma seção por equipe (ou só a selecionada no topo) + "Sem equipe"
+  let grupos;
+  if (!equipes.length) grupos = [{ id: "todos", nome: null, membros: perfis }];
+  else {
+    grupos = (eqSel ? [eqSel] : equipes).map((e) => ({ id: e.id, nome: e.nome, gerente: e.gerente, total: e.corretores.length, membros: membrosDe(e) }));
+    if (!eqSel) {
+      const comEquipe = new Set(grupos.flatMap((g) => g.membros.map((p) => p.c.nome)));
+      const sem = perfis.filter((p) => !comEquipe.has(p.c.nome));
+      if (sem.length) grupos.push({ id: "sem-equipe", nome: "Sem equipe", gerente: "", membros: sem, sem: true });
+    }
+  }
+
   const sec = document.createElement("section");
-  sec.innerHTML = `<div class="secao-hd" style="margin-top:6px"><h2>Perfil comportamental</h2><span>${perfis.length} corretores · 6 dimensões, normalizadas entre os corretores do período · Volume, Movimentação e 1º contato ficam só aqui, fora do score</span></div>`;
-  const grid = document.createElement("div");
-  grid.className = "radar-grid";
-  grid.innerHTML = perfis.length ? perfis.map((p, i) => radarCardHTML(p, i)).join("") : `<div class="vazio">Sem corretores com leads no período.</div>`;
-  sec.appendChild(grid);
+  sec.innerHTML = `<div class="secao-hd" style="margin-top:6px"><h2>Perfil comportamental</h2><span>${perfis.length} corretores · 6 dimensões, normalizadas entre os corretores do período · Volume, Movimentação e 1º contato ficam só aqui, fora do score</span></div>
+    ${grupos.length > 1 ? `<nav class="pf-atalhos">${grupos.map((g) => `<a href="#pf-${g.id}" class="pf-atalho">${esc(g.nome)} <b>${g.membros.length}</b></a>`).join("")}</nav>` : ""}`;
+  for (const g of grupos) {
+    const bloco = document.createElement("div");
+    bloco.className = "pf-grupo";
+    bloco.id = `pf-${g.id}`;
+    if (g.nome) {
+      const media = g.membros.length ? Math.round(g.membros.reduce((s, p) => s + p.score, 0) / g.membros.length) : null;
+      const semLeads = g.total ? g.total - g.membros.length : 0;
+      bloco.innerHTML = `<div class="pf-hd">
+        <div><h3>${esc(g.nome)}</h3><span>${g.gerente ? `Gerente: ${esc(g.gerente)} · ` : ""}${plural(g.membros.length, "corretor com leads", "corretores com leads")} no período${semLeads > 0 ? ` · ${plural(semLeads, "sem leads", "sem leads")}` : ""}${g.sem ? " · não estão em nenhuma equipe cadastrada" : ""}</span></div>
+        ${media != null ? `<div class="pf-media"><b>${media}</b><span>score médio</span></div>` : ""}
+      </div>`;
+    }
+    const grid = document.createElement("div");
+    grid.className = "radar-grid";
+    grid.innerHTML = g.membros.length ? g.membros.map((p) => radarCardHTML(p, idx.get(p.c.nome))).join("") : `<div class="vazio">Nenhum corretor desta equipe com leads no período.</div>`;
+    bloco.appendChild(grid);
+    sec.appendChild(bloco);
+  }
+  if (!perfis.length) sec.innerHTML += `<div class="vazio">Sem corretores com leads no período.</div>`;
   c.appendChild(sec);
 }
 

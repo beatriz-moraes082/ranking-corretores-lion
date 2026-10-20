@@ -237,6 +237,18 @@ tbody tr.lider td:first-child { box-shadow: inset 4px 0 0 var(--gold); }
 .pill.r { background: color-mix(in srgb, var(--red) 18%, transparent); color: var(--red); }
 
 /* ---------- Radar / perfil ---------- */
+/* perfil dividido por equipe */
+.pf-atalhos { display: flex; gap: 8px; flex-wrap: wrap; margin: -4px 0 8px; }
+.pf-atalho { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 20px; border: 1px solid var(--line); background: var(--surface); color: var(--txt); text-decoration: none; font-family: var(--font-disp); font-weight: 700; font-size: 13px; }
+.pf-atalho b { font-size: 11.5px; padding: 1px 8px; border-radius: 20px; background: var(--surface-2); color: var(--txt-dim); }
+.pf-atalho:hover { border-color: var(--gold); }
+.pf-grupo { margin-top: 34px; scroll-margin-top: 96px; }
+.pf-hd { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding-bottom: 14px; margin-bottom: 18px; border-bottom: 1px solid var(--line); }
+.pf-hd h3 { font-family: var(--font-disp); font-weight: 800; font-size: 21px; letter-spacing: -0.01em; }
+.pf-hd span { display: block; color: var(--txt-dim); font-size: 13px; margin-top: 4px; }
+.pf-media { text-align: right; }
+.pf-media b { display: block; font-family: var(--font-disp); font-weight: 900; font-size: 30px; line-height: 1; color: var(--gold); }
+.pf-media span { color: var(--txt-dim); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em; }
 .radar-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 18px; }
 .radar-card { border-radius: var(--radius); border: 1px solid var(--line); background: var(--card-grad); box-shadow: var(--shadow); padding: 20px; }
 .radar-hd { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
