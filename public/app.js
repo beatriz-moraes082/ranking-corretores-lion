@@ -374,16 +374,19 @@ function renderRanking(d, perfis) {
     const alvo = Number(el.dataset.cu);
     const money = el.dataset.money === "1";
     const small = el.querySelector("small"); // ex: " pts"
+    const escrever = (v) => { el.textContent = money ? brlK(v) : Math.round(v).toLocaleString("pt-BR"); if (small) el.appendChild(small); };
+    // O valor final já vai pra tela; a contagem é só enfeite. Sem isso, numa aba em
+    // segundo plano (a TV ligada direto) a animação não roda e o número fica em 0.
+    escrever(alvo);
+    if (document.hidden) return;
     const t0 = performance.now();
     const passo = (t) => {
       const p = Math.min(1, (t - t0) / 1000);
-      const e = 1 - Math.pow(1 - p, 3);
-      const v = alvo * e;
-      el.textContent = money ? brlK(v) : Math.round(v).toLocaleString("pt-BR");
-      if (small) el.appendChild(small);
+      escrever(p < 1 ? alvo * (1 - Math.pow(1 - p, 3)) : alvo);
       if (p < 1) requestAnimationFrame(passo);
     };
     requestAnimationFrame(passo);
+    setTimeout(() => escrever(alvo), 1200);
   });
 }
 
@@ -684,14 +687,27 @@ function renderFunil(d) {
   /* seletor de corretor */
   const top = document.createElement("section");
   top.className = "fn-top anim";
+  // Uma lista só: imobiliária, equipes (filtram o painel todo, como o seletor do
+  // topo) e corretores. Valores de equipe vêm como "eq:<id>".
+  const equipes = d.equipes || [];
+  const optEquipes = equipes.length ? `<optgroup label="Equipes">
+      <option value="eq:" ${!eq && !sel ? "selected" : ""}>Toda a imobiliária (resultado geral)</option>
+      ${equipes.map((e) => `<option value="eq:${esc(e.id)}" ${eq && eq.id === e.id && !sel ? "selected" : ""}>${esc(e.nome)}${e.gerente ? ` · ${esc(e.gerente)}` : ""} (resultado da equipe)</option>`).join("")}
+    </optgroup>` : `<option value="eq:" ${!sel ? "selected" : ""}>Toda a imobiliária (resultado geral)</option>`;
   top.innerHTML = `<label>Ver funil de
     <select id="corretorSel" class="sel">
-      <option value="">${esc(eq ? eq.nome : "Toda a imobiliária")} (resultado geral)</option>
-      ${[...corretores].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")).map((x) => `<option value="${esc(x.nome)}" ${x.nome === estado.corretorSel ? "selected" : ""}>${esc(x.nome.trim())}</option>`).join("")}
+      ${optEquipes}
+      <optgroup label="${eq ? `Corretores da ${esc(eq.nome)}` : "Corretores"}">
+        ${[...corretores].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")).map((x) => `<option value="${esc(x.nome)}" ${x.nome === estado.corretorSel ? "selected" : ""}>${esc(x.nome.trim())}</option>`).join("")}
+      </optgroup>
     </select></label>
     ${sel ? `<button class="btn-link" id="voltarGrupo">← voltar para ${esc(eq ? eq.nome : "a imobiliária")}</button>` : ""}
     <span class="fn-per">leads recebidos de ${per}</span>`;
-  top.querySelector("#corretorSel").addEventListener("change", (e) => { estado.corretorSel = e.target.value; render(); });
+  top.querySelector("#corretorSel").addEventListener("change", (e) => {
+    const v = e.target.value;
+    if (v.startsWith("eq:")) { estado.corretorSel = ""; definirEquipe(v.slice(3)); return; }
+    estado.corretorSel = v; render();
+  });
   top.querySelector("#voltarGrupo")?.addEventListener("click", () => { estado.corretorSel = ""; render(); });
   c.appendChild(top);
 
@@ -1146,14 +1162,17 @@ $("#chips").addEventListener("click", (e) => {
 $("#aplicar").addEventListener("click", () => carregar());
 $("#themeToggle").addEventListener("click", toggleTema);
 // Equipe vai na URL (?equipe=id): cada gerente pode salvar o link da própria equipe.
-$("#equipeSel").addEventListener("change", (e) => {
-  estado.equipe = e.target.value;
+// Troca a equipe (seletor do topo ou a lista "Ver funil de"): vai pra URL e fica salva.
+function definirEquipe(id) {
+  estado.equipe = id || "";
   estado.corretorSel = "";
   const u = new URL(location.href);
   if (estado.equipe) u.searchParams.set("equipe", estado.equipe); else u.searchParams.delete("equipe");
   history.replaceState(null, "", u);
+  try { localStorage.setItem("equipe", estado.equipe); } catch {}
   if (estado.data) render();
-});
+}
+$("#equipeSel").addEventListener("change", (e) => definirEquipe(e.target.value));
 estado.equipe = new URL(location.href).searchParams.get("equipe") || "";
 // O link sem ?view abre o modo TV (é o que passa na televisão da imobiliária).
 const viewUrl = new URL(location.href).searchParams.get("view");
@@ -1164,7 +1183,6 @@ try {
   if (ehApp && !estado.equipe) estado.equipe = localStorage.getItem("equipe") || "";
   if (estado.equipe) localStorage.setItem("equipe", estado.equipe);
 } catch {}
-$("#equipeSel").addEventListener("change", () => { try { localStorage.setItem("equipe", estado.equipe); } catch {} });
 
 // app instalável: registra o service worker (só funciona em https ou localhost)
 if ("serviceWorker" in navigator) {
