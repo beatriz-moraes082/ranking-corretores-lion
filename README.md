@@ -131,7 +131,7 @@ variável `ALERTA_DIAS` no `.env`.
 |----------|--------|-----------|
 | `SUPREMO_TOKEN` | — | **Obrigatório.** Token JWT da API do Supremo CRM. |
 | `PORT` | `8787` | Porta do servidor. |
-| `CACHE_TTL_MIN` | `15` | Minutos de cache dos dados do período. |
+| `BASE_TTL_MIN` | `30` | Minutos até baixar de novo a base do mês atual (o mês anterior é a cada 6 h). |
 | `ALERTA_DIAS` | `45` | Janela (dias) da varredura de leads parados. |
 | `EQUIPES_JSON` | — | Opcional. Equipes em JSON (substitui o `equipes.json`). |
 | `KV_URL` | — | Recomendado no Render. URL do Key Value (Redis) onde o cache sobrevive às publicações. |

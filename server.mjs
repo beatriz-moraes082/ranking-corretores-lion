@@ -32,60 +32,73 @@ loadEnv();
 
 const TOKEN = process.env.SUPREMO_TOKEN;
 const PORT = Number(process.env.PORT) || 8787;
-const CACHE_TTL = (Number(process.env.CACHE_TTL_MIN) || 15) * 60 * 1000;
 // Janela (em dias) da varredura global de "leads parados", independente do periodo do painel.
 const ALERTA_DIAS = Number(process.env.ALERTA_DIAS) || 45;
-const ALERTA_TTL = 60 * 60 * 1000; // status de "parado" muda devagar: refresh de hora em hora
 
 if (!TOKEN || TOKEN.includes("cole_seu_token")) {
   console.error("\n[ERRO] Defina SUPREMO_TOKEN no arquivo .env (copie de .env.example).\n");
   process.exit(1);
 }
 
-// --- cache (memoria + disco) com stale-while-revalidate ---
-// A API do Supremo e limitada a ~1 req/seg, entao uma consulta a frio de um mes
-// (~57 paginas) leva ~1 min. Servimos sempre o cache (mesmo vencido) na hora e
-// revalidamos em segundo plano; quem abre o painel quase nunca espera.
+// --- Dados: duas bases e tudo calculado a partir delas ---
+// O Supremo bloqueia (HTTP 429) quando recebe consultas demais. Antes, ranking,
+// leads parados e evolução faziam buscas separadas que se sobrepunham (~350 páginas
+// por hora). Agora o servidor só baixa DUAS bases de leads e calcula tudo nelas:
+//   - mês atual (dia 1 até hoje), renovada a cada BASE_TTL (30 min)
+//   - mês anterior inteiro, renovada a cada 6 h (muda pouco)
+// mais a lista de vendidos (a cada 2 h). Ranking, semana, leads parados e evolução
+// saem dessas bases sem nova consulta. Fica em torno de 80 páginas por hora.
 const CACHE_DIR = join(__dirname, ".cache");
-const CACHE_FILE = join(CACHE_DIR, "ranking-v2.json"); // v2: payload com funil por corretor
-const cache = new Map(); // key -> { ts, data }
+const CACHE_FILE = join(CACHE_DIR, "dados-v3.json");
+// BASE_TTL_MIN (e não o antigo CACHE_TTL_MIN=15 que ainda está no Render): renovar
+// o mês atual mais vezes que isso volta a encostar no limite do Supremo.
+const BASE_TTL = (Number(process.env.BASE_TTL_MIN) || 30) * 60 * 1000;
+const ANTERIOR_TTL = 6 * 60 * 60 * 1000;
+const VENDIDOS_TTL = 2 * 60 * 60 * 1000;
+const MAX_PERIODOS = 12; // períodos fora das bases (raros) ficam num cache próprio
+
+let baseAtual = null;    // { ts, inicio, fim, rows }
+let baseAnterior = null; // { ts, inicio, fim, rows }
 let vendidosCache = null; // { ts, rows }
-let alertasCache = null; // { ts, alertas, porCorretor }
-let alertasEmVoo = null;
-let evolucaoCache = null; // { ts, data }
-let evolucaoEmVoo = null;
-const emVoo = new Map(); // key -> Promise (dedupe de buscas simultaneas)
+const avulsos = new Map(); // "inicio|fim" -> { ts, data } (períodos fora das bases)
+const emVoo = new Map();   // dedupe de buscas simultâneas
 
-// Disco local + (opcional) Render Key Value em KV_URL. O disco do plano gratuito
-// do Render some a cada publicação; o Key Value não, então com ele o servidor
-// reinicia já com os dados e só busca no Supremo o que estiver vencido.
+// Só os campos que o painel usa (sem "interesses"/"anotacoes", que são textos longos).
+const CAMPOS = ["nome_pessoa", "telefone_pessoa", "nome_origem", "data_captura", "data_qualificado", "data_com_corretor",
+  "data_ultima_interacao", "nome_qualificador", "nome_corretor", "nome_status", "etapa", "nome_etapa",
+  "data_vendido_perdido", "nome_situacao", "valor_vendido", "motivo_perda"];
+const enxugar = (rows) => rows.map((r) => Object.fromEntries(CAMPOS.map((k) => [k, r[k] ?? null])));
+
+function faixas(hoje = new Date()) {
+  return {
+    atual: { inicio: isoDate(new Date(hoje.getFullYear(), hoje.getMonth(), 1)), fim: isoDate(hoje) },
+    anterior: { inicio: isoDate(new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1)), fim: isoDate(new Date(hoje.getFullYear(), hoje.getMonth(), 0)) },
+  };
+}
+const fresco = (e, ttl) => !!e && Date.now() - e.ts < ttl;
+
+// --- persistência: disco + (opcional) Render Key Value em KV_URL ---
 const armazem = criarArmazem(process.env.KV_URL);
-const KV_CHAVE = "elite-lion:cache:v2";
-const MAX_PERIODOS = 12; // períodos personalizados antigos saem do cache
+const KV_CHAVE = "elite-lion:dados:v3";
 let kvAgendado = null;
-
 function montarCache() {
-  const periodos = [...cache.entries()].sort((a, b) => b[1].ts - a[1].ts).slice(0, MAX_PERIODOS);
-  return { vendidos: vendidosCache, alertas: alertasCache, evolucao: evolucaoCache, periodos: Object.fromEntries(periodos) };
+  const per = [...avulsos.entries()].sort((a, b) => b[1].ts - a[1].ts).slice(0, MAX_PERIODOS);
+  return { versao: 3, baseAtual, baseAnterior, vendidos: vendidosCache, avulsos: Object.fromEntries(per) };
 }
 function aplicarCache(obj, origem) {
-  if (!obj) return;
-  const maisNovo = (a, b) => (!a ? b : !b ? a : (b.ts || 0) > (a.ts || 0) ? b : a);
-  vendidosCache = maisNovo(vendidosCache, obj.vendidos);
-  alertasCache = maisNovo(alertasCache, obj.alertas);
-  evolucaoCache = maisNovo(evolucaoCache, obj.evolucao);
-  for (const [k, v] of Object.entries(obj.periodos || {})) {
-    if (!cache.has(k) || (v.ts || 0) > cache.get(k).ts) cache.set(k, v);
-  }
-  console.log(`  cache carregado do ${origem} (${cache.size} periodos)`);
+  if (!obj || obj.versao !== 3) return;
+  const novo = (a, b) => (!a ? b : !b ? a : (b.ts || 0) > (a.ts || 0) ? b : a);
+  baseAtual = novo(baseAtual, obj.baseAtual);
+  baseAnterior = novo(baseAnterior, obj.baseAnterior);
+  vendidosCache = novo(vendidosCache, obj.vendidos);
+  for (const [k, v] of Object.entries(obj.avulsos || {})) if (!avulsos.has(k) || v.ts > avulsos.get(k).ts) avulsos.set(k, v);
+  console.log(`  dados carregados do ${origem} (mês atual: ${baseAtual?.rows.length ?? 0} leads, anterior: ${baseAnterior?.rows.length ?? 0})`);
 }
 async function persistir() {
-  const obj = montarCache();
   try {
     await mkdir(CACHE_DIR, { recursive: true });
-    await writeFile(CACHE_FILE, JSON.stringify(obj));
+    await writeFile(CACHE_FILE, JSON.stringify(montarCache()));
   } catch {}
-  // Key Value: no máximo uma gravação a cada 20s (o cache tem ~1 MB)
   if (armazem && !kvAgendado) {
     kvAgendado = setTimeout(() => {
       kvAgendado = null;
@@ -94,63 +107,130 @@ async function persistir() {
   }
 }
 function carregarCacheDisco() {
-  try {
-    if (!existsSync(CACHE_FILE)) return;
-    aplicarCache(JSON.parse(readFileSync(CACHE_FILE, "utf8")), "disco");
-  } catch {}
+  try { if (existsSync(CACHE_FILE)) aplicarCache(JSON.parse(readFileSync(CACHE_FILE, "utf8")), "disco"); } catch {}
 }
 async function carregarCacheKV() {
   if (!armazem) return;
   try {
     const bruto = await armazem.get(KV_CHAVE);
-    if (bruto) aplicarCache(JSON.parse(bruto), "Key Value");
-    else console.log("  [kv] vazio (primeira vez)");
-  } catch (e) {
-    console.error("  [kv] falha ao ler:", e.message);
-  }
-}
-// o cache deste periodo ainda esta dentro do prazo?
-const fresco = (entrada, ttl) => !!entrada && Date.now() - entrada.ts < ttl;
-
-async function getVendidos() {
-  if (vendidosCache && Date.now() - vendidosCache.ts < CACHE_TTL * 4) return vendidosCache.rows;
-  const { rows } = await fetchVendidos(TOKEN);
-  vendidosCache = { ts: Date.now(), rows };
-  return rows;
+    if (bruto) aplicarCache(JSON.parse(bruto), "Key Value"); else console.log("  [kv] vazio (primeira vez)");
+  } catch (e) { console.error("  [kv] falha ao ler:", e.message); }
 }
 
-// Varredura global de leads parados (janela de ALERTA_DIAS dias), com cache proprio.
-function getAlertas() {
-  if (alertasCache && Date.now() - alertasCache.ts < ALERTA_TTL) return Promise.resolve(alertasCache);
-  if (alertasEmVoo) return alertasEmVoo;
-  alertasEmVoo = (async () => {
-    const hoje = new Date();
-    const ini = new Date(hoje); ini.setDate(hoje.getDate() - ALERTA_DIAS);
-    const { rows } = await fetchLeadsPorPeriodo(TOKEN, isoDate(ini), isoDate(hoje));
-    const { alertas, porCorretor } = escanearParados(rows, new Date(), 15);
-    alertasCache = { ts: Date.now(), alertas, porCorretor };
+// --- buscas (as únicas que vão ao Supremo) ---
+function umaVez(chave, fn) {
+  if (emVoo.has(chave)) return emVoo.get(chave);
+  const p = fn().finally(() => emVoo.delete(chave));
+  emVoo.set(chave, p);
+  return p;
+}
+const baseValida = (b, faixa) => !!b && b.inicio === faixa.inicio;
+function buscarBase(qual) {
+  return umaVez(`base:${qual}`, async () => {
+    const faixa = faixas()[qual];
+    const { rows } = await fetchLeadsPorPeriodo(TOKEN, faixa.inicio, faixa.fim);
+    const base = { ts: Date.now(), ...faixa, rows: enxugar(rows) };
+    if (qual === "atual") baseAtual = base; else baseAnterior = base;
+    memo.clear();
+    console.log(`  [dados] base ${qual} atualizada: ${rows.length} leads`);
     persistir();
-    return alertasCache;
-  })().finally(() => (alertasEmVoo = null));
-  return alertasEmVoo;
+    return base;
+  });
 }
-
-// --- Equipes (a API do Supremo nao tem equipe/gerente) ---
-// Definidas em equipes.json (ou na env EQUIPES_JSON, que tem prioridade). Lido a
-// cada requisicao, entao da pra editar sem reiniciar.
-function lerEquipes() {
+function buscarVendidos() {
+  return umaVez("vendidos", async () => {
+    const { rows } = await fetchVendidos(TOKEN);
+    vendidosCache = { ts: Date.now(), rows: enxugar(rows) };
+    memo.clear();
+    persistir();
+    return vendidosCache;
+  });
+}
+// Garante a base (espera só se não existir nenhuma versão dela).
+async function garantirBase(qual) {
+  const b = qual === "atual" ? baseAtual : baseAnterior;
+  return baseValida(b, faixas()[qual]) ? b : buscarBase(qual);
+}
+async function garantirVendidos() {
+  return vendidosCache || buscarVendidos();
+}
+// Renova o que venceu, em sequência (é o único lugar que consulta o Supremo
+// periodicamente). Ordem: o que a TV mostra primeiro.
+let renovando = false;
+async function renovar() {
+  if (renovando) return;
+  renovando = true;
   try {
-    const raw = process.env.EQUIPES_JSON || readFileSync(join(__dirname, "equipes.json"), "utf8");
-    const lista = JSON.parse(raw);
-    return Array.isArray(lista) ? lista.filter((e) => e && e.id && Array.isArray(e.corretores)) : [];
-  } catch {
-    return [];
+    const f = faixas();
+    if (!baseValida(baseAtual, f.atual) || !fresco(baseAtual, BASE_TTL)) await buscarBase("atual");
+    if (!fresco(vendidosCache, VENDIDOS_TTL)) await buscarVendidos();
+    if (!baseValida(baseAnterior, f.anterior) || !fresco(baseAnterior, ANTERIOR_TTL)) await buscarBase("anterior");
+  } catch (e) {
+    console.error("  [dados] falha ao renovar:", e.message);
+  } finally {
+    renovando = false;
   }
 }
 
-// --- Evolucao: semana e mes, atual x anterior ---
-// Semana = ultimos 7 dias x os 7 dias antes (igual ao filtro "Semana").
-// Mes = do dia 1 ate hoje x o mesmo trecho do mes anterior (igual ao filtro "Mes").
+// --- cálculos (sem rede) ---
+const memo = new Map(); // resultados derivados; zera quando uma base muda
+const dia = (s) => (s ? String(s).slice(0, 10) : "");
+function linhasEntre(inicio, fim) {
+  const out = [];
+  for (const b of [baseAnterior, baseAtual]) if (b) for (const r of b.rows) { const d = dia(r.data_captura); if (d >= inicio && d <= fim) out.push(r); }
+  return out;
+}
+const cobre = (inicio, fim) => { const f = faixas(); return inicio >= f.anterior.inicio && fim <= f.atual.fim; };
+
+function alertasAtuais() {
+  if (memo.has("alertas")) return memo.get("alertas");
+  if (!baseAtual) return null;
+  const hoje = new Date();
+  const ini = new Date(hoje); ini.setDate(hoje.getDate() - ALERTA_DIAS);
+  const r = escanearParados(linhasEntre(isoDate(ini), isoDate(hoje)), hoje, 15);
+  memo.set("alertas", r);
+  return r;
+}
+
+async function calcularRanking(inicio, fim) {
+  const chave = `ranking:${inicio}|${fim}`;
+  let data = memo.get(chave);
+  if (!data) {
+    let leadsPeriodo;
+    if (cobre(inicio, fim)) {
+      const f = faixas();
+      await garantirBase("atual");
+      if (inicio < f.atual.inicio) await garantirBase("anterior");
+      leadsPeriodo = linhasEntre(inicio, fim);
+    } else {
+      // período fora das bases (raro): busca direta, com cache próprio
+      const av = avulsos.get(`${inicio}|${fim}`);
+      if (av && fresco(av, ANTERIOR_TTL)) return aplicarAlertas(av.data);
+      leadsPeriodo = enxugar((await umaVez(`avulso:${inicio}|${fim}`, () => fetchLeadsPorPeriodo(TOKEN, inicio, fim))).rows);
+    }
+    const vendidos = (await garantirVendidos()).rows;
+    data = agregar({ leadsPeriodo, vendidos, periodo: { inicio: new Date(`${inicio}T00:00:00`), fim: new Date(`${fim}T23:59:59`) }, agora: new Date() });
+    data.geradoEm = new Date(Math.min(baseAtual?.ts || Date.now(), Date.now())).toISOString();
+    if (cobre(inicio, fim)) memo.set(chave, data);
+    else { avulsos.set(`${inicio}|${fim}`, { ts: Date.now(), data }); persistir(); }
+  }
+  return aplicarAlertas(data);
+}
+
+// Sobrepõe os leads parados (janela de ALERTA_DIAS dias) em qualquer período.
+function aplicarAlertas(data) {
+  const a = alertasAtuais();
+  data.alertaJanelaDias = ALERTA_DIAS;
+  data.alertasProntos = !!a;
+  if (a) {
+    data.alertas = a.alertas;
+    data.resumo.parados15d = a.alertas.length;
+    for (const c of data.corretores) c.parados15d = a.porCorretor[c.nome] || 0;
+  }
+  return data;
+}
+
+// --- Evolução: semana e mês, atual x anterior (das mesmas bases) ---
 function janelasEvolucao(hoje = new Date()) {
   const d = (base, dias) => { const x = new Date(base); x.setDate(x.getDate() + dias); return x; };
   const iniMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
@@ -164,87 +244,26 @@ function janelasEvolucao(hoje = new Date()) {
     mesAnterior: { inicio: isoDate(iniMesAnt), fim: isoDate(fimMesAnt) },
   };
 }
-
-function buscarEvolucao() {
-  if (evolucaoEmVoo) return evolucaoEmVoo;
-  evolucaoEmVoo = (async () => {
-    const janelas = janelasEvolucao();
-    const datas = Object.values(janelas);
-    const inicio = datas.map((j) => j.inicio).sort()[0];
-    const fim = datas.map((j) => j.fim).sort().at(-1);
-    const vendidos = await getVendidos();
-    const { rows } = await fetchLeadsPorPeriodo(TOKEN, inicio, fim);
-    const data = agregarEvolucao({ leads: rows, vendidos, janelas });
-    data.geradoEm = new Date().toISOString();
-    evolucaoCache = { ts: Date.now(), data };
-    persistir();
-    return data;
-  })().finally(() => (evolucaoEmVoo = null));
-  return evolucaoEmVoo;
-}
-
-// Mesmo esquema stale-while-revalidate do ranking. Se o cache for de outro dia,
-// as janelas mudaram: espera a busca nova.
-async function getEvolucao() {
-  const hit = evolucaoCache?.data;
-  if (hit && hit.janelas?.mesAtual?.fim === janelasEvolucao().mesAtual.fim) {
-    if (Date.now() - evolucaoCache.ts >= CACHE_TTL * 2) buscarEvolucao().catch(() => {});
-    return hit;
-  }
-  return buscarEvolucao();
-}
-
-// Busca + agrega de verdade (custa rede). Deduplicado por periodo.
-function buscarEAgregar(inicio, fim) {
-  const key = `${inicio}|${fim}`;
-  if (emVoo.has(key)) return emVoo.get(key);
-  const p = (async () => {
-    // Sequencial de proposito: a API limita conexoes simultaneas/taxa (429).
-    const vendidos = await getVendidos();
-    const { rows: leadsPeriodo } = await fetchLeadsPorPeriodo(TOKEN, inicio, fim);
-    const data = agregar({
-      leadsPeriodo, vendidos,
-      periodo: { inicio: new Date(`${inicio}T00:00:00`), fim: new Date(`${fim}T23:59:59`) },
-      agora: new Date(),
-    });
-    data.geradoEm = new Date().toISOString();
-    cache.set(key, { ts: Date.now(), data });
-    persistir();
-    return data;
-  })().finally(() => emVoo.delete(key));
-  emVoo.set(key, p);
-  return p;
-}
-
-async function calcularRanking(inicio, fim) {
-  const key = `${inicio}|${fim}`;
-  const hit = cache.get(key);
-  let data;
-  if (hit) {
-    // stale-while-revalidate: se venceu, dispara refresh em background e serve o atual.
-    if (Date.now() - hit.ts >= CACHE_TTL) buscarEAgregar(inicio, fim).catch(() => {});
-    data = hit.data;
-  } else {
-    // Sem cache: precisa aguardar (primeira carga do periodo).
-    data = await buscarEAgregar(inicio, fim);
-  }
-  return aplicarAlertas(data);
-}
-
-// Sobrepoe o alerta global (varredura independente do periodo) na resposta, a
-// cada requisicao. Assim os alertas aparecem assim que a varredura termina, sem
-// esperar o ranking ser reagregado. Dispara a varredura se faltar/estiver velha.
-function aplicarAlertas(data) {
-  if (!alertasCache || Date.now() - alertasCache.ts >= ALERTA_TTL) getAlertas().catch(() => {});
-  data.alertaJanelaDias = ALERTA_DIAS;
-  data.alertasProntos = !!alertasCache;
-  if (alertasCache) {
-    data.alertas = alertasCache.alertas;
-    data.resumo.parados15d = alertasCache.alertas.length;
-    const map = alertasCache.porCorretor;
-    for (const c of data.corretores) c.parados15d = map[c.nome] || 0;
-  }
+function evolucaoAtual() {
+  if (memo.has("evolucao")) return memo.get("evolucao");
+  if (!baseAtual || !baseAnterior || !vendidosCache) return null;
+  const data = agregarEvolucao({ leads: [...baseAnterior.rows, ...baseAtual.rows], vendidos: vendidosCache.rows, janelas: janelasEvolucao() });
+  data.geradoEm = new Date(baseAtual.ts).toISOString();
+  memo.set("evolucao", data);
   return data;
+}
+
+// --- Equipes (a API do Supremo nao tem equipe/gerente) ---
+// Definidas em equipes.json (ou na env EQUIPES_JSON, que tem prioridade). Lido a
+// cada requisicao, entao da pra editar sem reiniciar.
+function lerEquipes() {
+  try {
+    const raw = process.env.EQUIPES_JSON || readFileSync(join(__dirname, "equipes.json"), "utf8");
+    const lista = JSON.parse(raw);
+    return Array.isArray(lista) ? lista.filter((e) => e && e.id && Array.isArray(e.corretores)) : [];
+  } catch {
+    return [];
+  }
 }
 
 // --- static ---
@@ -283,14 +302,12 @@ const server = createServer(async (req, res) => {
     }
 
     if (url.pathname === "/api/evolucao") {
-      // Na subida, a evolucao (a busca mais pesada) espera o ranking do mes ficar
-      // pronto, para nao disputar o limite do Supremo com o que a TV mostra primeiro.
-      const mes = periodoMesAtual();
-      if (!evolucaoCache && !cache.has(`${mes.inicio}|${mes.fim}`)) {
+      // Sai das mesmas bases do ranking; enquanto o mês anterior não chegou, 202.
+      const data = evolucaoAtual();
+      if (!data) {
         res.writeHead(202, { "content-type": "application/json; charset=utf-8" });
         return res.end(JSON.stringify({ pendente: true }));
       }
-      const data = await getEvolucao();
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       return res.end(JSON.stringify(data));
     }
@@ -318,42 +335,16 @@ const server = createServer(async (req, res) => {
   }
 });
 
-function periodoMesAtual() {
-  const hoje = new Date();
-  return { inicio: isoDate(new Date(hoje.getFullYear(), hoje.getMonth(), 1)), fim: isoDate(hoje) };
-}
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   console.log(`\n  Ranking de Corretores - Lion Negocios Imobiliarios`);
   console.log(`  Painel rodando em: http://localhost:${PORT}`);
-
-  carregarCacheDisco();
   console.log(armazem ? "  armazém persistente: Render Key Value (KV_URL)" : "  armazém persistente: não configurado (defina KV_URL)");
-
-  // Pre-aquece o mes atual (sem bloquear) e revalida periodicamente, para que
-  // quem abrir o painel pegue sempre o cache quente.
-  const aquecer = () => {
-    const { inicio, fim } = periodoMesAtual();
-    return buscarEAgregar(inicio, fim)
-      .then((d) => console.log(`  [cache] mes atual pronto: ${d.resumo.leads} leads, ${d.resumo.vendas} vendas, ${d.resumo.parados15d} parados`))
-      .catch((e) => console.error("  [cache] falha ao aquecer:", e.message));
-  };
-  // Ordem na subida: 1) ranking do mes (o que a TV mostra primeiro), 2) varredura
-  // de parados, 3) evolucao. Tudo em sequencia para nao estourar o limite do Supremo.
-  // Só busca no Supremo o que estiver vencido: depois de uma publicação, com o
-  // Key Value configurado, quase nada precisa ser buscado de novo.
-  setTimeout(async () => {
-    await carregarCacheKV();
-    const { inicio, fim } = periodoMesAtual();
-    if (!fresco(cache.get(`${inicio}|${fim}`), CACHE_TTL)) await aquecer();
-    else console.log("  [cache] mes atual ainda fresco, sem nova busca");
-    await getAlertas().catch((e) => console.error("  [cache] falha nos parados:", e.message));
-    const evoOk = fresco(evolucaoCache, CACHE_TTL * 2) && evolucaoCache.data?.janelas?.mesAtual?.fim === janelasEvolucao().mesAtual.fim;
-    if (!evoOk) await buscarEvolucao().catch((e) => console.error("  [cache] falha na evolucao:", e.message));
-  }, 500);
-  setInterval(aquecer, CACHE_TTL);
-  setInterval(() => buscarEvolucao().catch(() => {}), CACHE_TTL * 2);
-  // Alerta global (varredura de 45 dias) tem ciclo proprio, mais espacado.
-  setInterval(() => getAlertas().catch(() => {}), ALERTA_TTL);
+  carregarCacheDisco();
+  await carregarCacheKV();
+  // Renova o que estiver vencido agora e depois a cada 5 min (cada base só é
+  // baixada de novo quando passa do seu prazo).
+  renovar();
+  setInterval(renovar, 5 * 60 * 1000);
   console.log("");
 });
