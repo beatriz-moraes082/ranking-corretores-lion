@@ -27,10 +27,11 @@ const DIM_DESC = {
 };
 
 /* ---------- tema ---------- */
-// variação de cores do painel completo (prévia): ?cores=a (detalhes) ou ?cores=b (fundos)
+// Cores do painel completo: "b" (fundos em degradê suave) é o padrão escolhido.
+// ?cores=a mostra a variação com cor só nos detalhes; ?cores=0 volta ao visual sem degradês.
 (function initCores() {
   const v = new URL(location.href).searchParams.get("cores");
-  if (v === "a" || v === "b") document.documentElement.dataset.cores = v;
+  if (v !== "0") document.documentElement.dataset.cores = v === "a" ? "a" : "b";
 })();
 (function initTema() {
   // Padrão: escuro (mais forte para exibição em TV). Usuário pode alternar.
