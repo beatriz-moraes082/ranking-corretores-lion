@@ -463,6 +463,81 @@ tr.selecionado td:first-child { box-shadow: inset 4px 0 0 var(--gold); }
 @media (max-width: 520px) { .pp { padding: 22px 18px 18px; } .pp-barra { grid-template-columns: 90px 1fr 48px; } }
 @media (prefers-reduced-motion: reduce) { .popup[open] .pp { animation: none; } }
 
+
+/* =====================================================================
+   VARIAÇÕES DE COR DO PAINEL COMPLETO (prévia: ?cores=a / ?cores=b)
+   Paleta da Lion estendida: terracota, sálvia, ocre, areia e coral, sempre
+   em degradês de dois tons da mesma cor (nunca arco-íris).
+   ===================================================================== */
+:root {
+  --g-terra: linear-gradient(135deg, #a65b45, #d08a6f);
+  --g-salvia: linear-gradient(135deg, #4f7a5f, #8fb89b);
+  --g-ocre: linear-gradient(135deg, #a8792a, #e0b25a);
+  --g-areia: linear-gradient(135deg, #b8a18a, #e2d3c2);
+  --g-coral: linear-gradient(135deg, #c2412f, #ef7a64);
+  --g-ouro: linear-gradient(160deg, #e9c27a, #b8893a);
+  --g-prata: linear-gradient(160deg, #e4e2dc, #a9a69e);
+  --g-bronze: linear-gradient(160deg, #d9a07f, #9a5539);
+}
+.k0 { --kg: var(--g-salvia); --kt: #4f7a5f; }
+.k1 { --kg: var(--g-terra); --kt: #a65b45; }
+.k2 { --kg: var(--g-ocre); --kt: #94691f; }
+.k3 { --kg: var(--g-areia); --kt: #8a7158; }
+.k4 { --kg: var(--g-coral); --kt: #c2412f; }
+:root[data-theme="dark"] .k0 { --kt: #8fb89b; }
+:root[data-theme="dark"] .k1 { --kt: #e6a88f; }
+:root[data-theme="dark"] .k2 { --kt: #e0b25a; }
+:root[data-theme="dark"] .k3 { --kt: #e2d3c2; }
+:root[data-theme="dark"] .k4 { --kt: #ef7a64; }
+
+/* ---- A · cor nos detalhes: fundo limpo, degradê em faixas, barras e avatares ---- */
+:root[data-cores="a"] .topbar { border-bottom: 0; }
+:root[data-cores="a"] .topbar::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: linear-gradient(90deg, #a65b45, #e0b25a 50%, #4f7a5f); }
+:root[data-cores="a"] .kpi::before { inset: 0 0 auto 0; width: auto; height: 5px; background: var(--kg); }
+:root[data-cores="a"] .kpi .val { color: var(--kt); }
+:root[data-cores="a"] .pod-card::after { content: ""; position: absolute; inset: 0 0 auto 0; height: 6px; }
+:root[data-cores="a"] .pod-card.p1::after { background: var(--g-ouro); }
+:root[data-cores="a"] .pod-card.p2::after { background: var(--g-prata); }
+:root[data-cores="a"] .pod-card.p3::after { background: var(--g-bronze); }
+:root[data-cores="a"] .pod-card.p1 { box-shadow: 0 24px 60px rgba(184, 137, 58, 0.28); border-color: rgba(224, 178, 90, 0.5); }
+:root[data-cores="a"] .pod-card .pod-av { box-shadow: 0 0 0 4px var(--surface-solid), 0 0 0 7px var(--medalha, transparent), 0 10px 26px rgba(0, 0, 0, 0.25); }
+:root[data-cores="a"] .pod-card.p1 { --medalha: #e0b25a; }
+:root[data-cores="a"] .pod-card.p2 { --medalha: #c9c7c0; }
+:root[data-cores="a"] .pod-card.p3 { --medalha: #c07f58; }
+:root[data-cores="a"] .pod-card.p1 .pod-medal { color: #b8893a; }
+:root[data-cores="a"] .mini-bar > i, :root[data-cores="a"] .fx-track > i, :root[data-cores="a"] .peso-track > i { background: var(--g-terra); }
+:root[data-cores="a"] .chip.ativo { background: var(--g-terra); color: #fff; }
+:root[data-cores="a"] .view-tab.ativo { background: linear-gradient(var(--bg), var(--bg)) padding-box, linear-gradient(90deg, #a65b45, #e0b25a) border-box; border: 1px solid transparent; }
+:root[data-cores="a"] tbody tr.lider { background: linear-gradient(90deg, rgba(224, 178, 90, 0.2), transparent 70%); }
+:root[data-cores="a"] tbody tr.lider td, :root[data-cores="b"] tbody tr.lider td { background: transparent; }
+:root[data-cores="a"] tbody tr.lider td:first-child { box-shadow: inset 4px 0 0 #e0b25a; }
+
+/* ---- B · fundos em degradê suave: cada card ganha o tom da sua cor ---- */
+:root[data-cores="b"] .glow {
+  background:
+    radial-gradient(55% 45% at 90% -5%, rgba(166, 91, 69, 0.35), transparent 65%),
+    radial-gradient(45% 40% at 0% 15%, rgba(79, 122, 95, 0.22), transparent 60%),
+    radial-gradient(50% 40% at 60% 100%, rgba(224, 178, 90, 0.16), transparent 60%);
+  opacity: 1;
+}
+:root[data-cores="b"] .kpi { border-color: transparent; background: linear-gradient(150deg, color-mix(in srgb, var(--kt) 22%, var(--surface-solid)), var(--surface-solid) 75%); }
+:root[data-cores="b"] .kpi::before { display: none; }
+:root[data-cores="b"] .kpi .val { color: var(--kt); }
+:root[data-cores="b"] .kpi .rot { color: var(--kt); }
+:root[data-cores="b"] .pod-card { border-color: transparent; }
+:root[data-cores="b"] .pod-card.p1 { background: linear-gradient(165deg, rgba(224, 178, 90, 0.42), rgba(224, 178, 90, 0.06) 70%), var(--surface-solid); box-shadow: 0 24px 60px rgba(184, 137, 58, 0.3); }
+:root[data-cores="b"] .pod-card.p2 { background: linear-gradient(165deg, rgba(201, 199, 192, 0.45), rgba(201, 199, 192, 0.06) 70%), var(--surface-solid); }
+:root[data-cores="b"] .pod-card.p3 { background: linear-gradient(165deg, rgba(192, 127, 88, 0.4), rgba(192, 127, 88, 0.06) 70%), var(--surface-solid); }
+:root[data-cores="b"] .pod-card.p1::after { background: var(--g-ouro); }
+:root[data-cores="b"] .pod-card.p1 .pod-medal { color: #a8792a; }
+:root[data-theme="dark"][data-cores="b"] .pod-card.p1 .pod-medal { color: #e0b25a; }
+:root[data-cores="b"] .mini-bar > i, :root[data-cores="b"] .fx-track > i, :root[data-cores="b"] .peso-track > i { background: var(--g-terra); }
+:root[data-cores="b"] .chip.ativo { background: var(--g-terra); color: #fff; }
+:root[data-cores="b"] .tabela-wrap, :root[data-cores="b"] .alertas-box { background: linear-gradient(180deg, color-mix(in srgb, #a65b45 7%, var(--surface-solid)), var(--surface-solid) 30%); }
+:root[data-cores="b"] tbody tr.lider { background: linear-gradient(90deg, rgba(224, 178, 90, 0.28), transparent 75%); }
+:root[data-cores="b"] tbody tr.lider td:first-child { box-shadow: inset 4px 0 0 #e0b25a; }
+:root[data-cores="b"] .fx-stage { background: linear-gradient(160deg, color-mix(in srgb, #a65b45 calc(var(--a) * 26%), var(--surface-2)), var(--surface-2)); }
+
 /* =====================================================================
    MODO TV — estilo "galeria clara": off-white da Lion, tipografia fina,
    linhas finas, uma cor de destaque por tela. Medido em --u (1% da largura

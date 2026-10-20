@@ -27,6 +27,11 @@ const DIM_DESC = {
 };
 
 /* ---------- tema ---------- */
+// variação de cores do painel completo (prévia): ?cores=a (detalhes) ou ?cores=b (fundos)
+(function initCores() {
+  const v = new URL(location.href).searchParams.get("cores");
+  if (v === "a" || v === "b") document.documentElement.dataset.cores = v;
+})();
 (function initTema() {
   // Padrão: escuro (mais forte para exibição em TV). Usuário pode alternar.
   const tema = localStorage.getItem("tema") || "dark";
@@ -257,7 +262,7 @@ function renderRanking(d, perfis) {
   const kpiEl = document.createElement("section");
   kpiEl.className = "kpis";
   kpiEl.innerHTML = kpis.map((k, i) => `
-    <div class="kpi anim" style="--kc:${k.cor};animation-delay:${i * 60}ms">
+    <div class="kpi anim k${i}" style="--kc:${k.cor};animation-delay:${i * 60}ms">
       <div class="rot"><em>${k.ico}</em>${k.rot}</div>
       <div class="val" data-cu="${k.val}" data-money="${k.money ? 1 : 0}">0</div>
       <div class="sub">${k.sub}</div>
