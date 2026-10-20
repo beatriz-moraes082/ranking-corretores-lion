@@ -724,7 +724,7 @@ function renderFunil(d) {
   } else {
     secF.innerHTML = funilFluxoHTML({
       titulo: esc(eq ? eq.nome : "Imobiliária"),
-      sub: `${corretores.length} corretores · ${num(fGrupo[0])} qualificados recebidos${eq ? " · comparado com a imobiliária" : ""}`,
+      sub: `${plural(corretores.length, "corretor", "corretores")} · ${num(fGrupo[0])} qualificados recebidos${eq ? " · comparado com a imobiliária" : ""}`,
       f: fGrupo, ref: eq ? fImob : null, refNome: "imob.", etapas,
     });
   }
