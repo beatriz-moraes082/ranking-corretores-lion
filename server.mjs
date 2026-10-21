@@ -183,10 +183,13 @@ async function garantirVendidos() {
 // Renova o que venceu, em sequência (é o único lugar que consulta o Supremo
 // periodicamente). Ordem: o que a TV mostra primeiro.
 // A agenda roda a cada 5 min, mas só consulta o Supremo quando algo está na hora.
-let renovando = false;
+let renovando = false, renovandoDesde = 0, ultimaAgenda = null, erroAgenda = null;
+const iniciouEm = Date.now();
 async function renovar() {
+  // trava de segurança: uma rodada presa há mais de 20 min é liberada
+  if (renovando && Date.now() - renovandoDesde > 20 * 60 * 1000) { console.warn("  [dados] agenda presa, liberando"); renovando = false; emVoo.clear(); }
   if (renovando || statusLimite().pausado) return;
-  renovando = true;
+  renovando = true; renovandoDesde = Date.now(); ultimaAgenda = Date.now();
   try {
     const f = faixas();
     const m = momento();
@@ -206,11 +209,28 @@ async function renovar() {
     const anteriorDeOntem = (baseAnterior.dia || "") < m.hoje;
     if (anteriorDeOntem && (!m.expediente || m.slotHora === 17)) await buscarBase("anterior");
     if (Date.now() - vendidosCache.ts > 24 * 60 * 60 * 1000) await buscarVendidos();
+    erroAgenda = null;
   } catch (e) {
+    erroAgenda = { em: Date.now(), msg: e.message };
     console.error("  [dados] agenda:", e.message);
   } finally {
     renovando = false;
   }
+}
+
+// Diagnóstico sem consultar o Supremo: /api/status
+function statusServidor() {
+  const h = (t) => (t ? new Date(t).toLocaleString("pt-BR") : null);
+  const b = (x) => x && { leads: x.rows.length, de: x.inicio, ate: x.fim, baixadaEm: h(x.ts), hojeEm: h(x.tsHoje), slot: x.slot || null, dia: x.dia || null };
+  const lim = statusLimite();
+  return {
+    agora: h(Date.now()), ligadoDesde: h(iniciouEm), agenda: momento(),
+    baseAtual: b(baseAtual), baseAnterior: b(baseAnterior), vendidos: vendidosCache && { qtd: vendidosCache.rows.length, em: h(vendidosCache.ts) },
+    renovando, renovandoDesde: renovando ? h(renovandoDesde) : null, ultimaAgenda: h(ultimaAgenda),
+    erroAgenda: erroAgenda && { em: h(erroAgenda.em), msg: erroAgenda.msg }, buscasEmAndamento: [...emVoo.keys()],
+    supremo: { pausadoAte: lim.pausado ? h(lim.retomaEm) : null, ultimoSucesso: h(lim.ultimoSucesso), ultimo429: h(lim.ultimo429), consultasDesdeQueLigou: lim.consultas },
+    keyValue: !!armazem,
+  };
 }
 
 // --- cálculos (sem rede) ---
@@ -344,6 +364,11 @@ const server = createServer(async (req, res) => {
 
     // Equipes vêm do equipes.json, sem consultar o Supremo: assim aparecem mesmo
     // quando a tela está usando dados guardados de antes das equipes existirem.
+    if (url.pathname === "/api/status") {
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-cache" });
+      return res.end(JSON.stringify(statusServidor(), null, 2));
+    }
+
     if (url.pathname === "/api/equipes") {
       res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-cache" });
       return res.end(JSON.stringify(lerEquipes()));

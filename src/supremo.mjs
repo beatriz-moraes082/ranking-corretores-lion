@@ -23,15 +23,18 @@ let pausaAte = 0;
 let pausaAtual = 0;
 const PAUSA_MIN = 30 * 60_000, PAUSA_MAX = 60 * 60_000;
 function registrar429() {
+  ultimo429 = Date.now();
   pausaAtual = pausaAtual ? Math.min(PAUSA_MAX, pausaAtual * 2) : PAUSA_MIN;
   pausaAte = Date.now() + pausaAtual;
   console.warn(`  [supremo] 429: pausando consultas por ${Math.round(pausaAtual / 60000)} min`);
 }
 function registrarSucesso() {
   pausaAtual = 0;
+  ultimoSucesso = Date.now();
 }
+let ultimoSucesso = 0, ultimo429 = 0, consultas = 0;
 export function statusLimite() {
-  return { pausado: Date.now() < pausaAte, retomaEm: pausaAte };
+  return { pausado: Date.now() < pausaAte, retomaEm: pausaAte, ultimoSucesso, ultimo429, consultas };
 }
 export class BloqueioSupremo extends Error {}
 function throttle() {
@@ -44,8 +47,14 @@ function throttle() {
   let liberar;
   fila = new Promise((r) => (liberar = r));
   return anterior.then(async () => {
-    const pausa = pausaAte - Date.now();
-    if (pausa > 0) await sleep(pausa);
+    // Se o bloqueio começou enquanto esta consulta esperava na fila, desiste na hora
+    // (antes ela dormia a pausa inteira e prendia a agenda do servidor).
+    if (Date.now() < pausaAte) {
+      liberar();
+      const e = new BloqueioSupremo("Supremo bloqueado durante a fila");
+      e.bloqueio = true;
+      throw e;
+    }
     const espera = MIN_INTERVALO_MS - (Date.now() - ultimaChamada);
     if (espera > 0) await sleep(espera);
     ultimaChamada = Date.now();
@@ -61,6 +70,7 @@ async function fetchPage(path, token, { retries = 10 } = {}) {
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
       await throttle();
+      consultas++;
       const res = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
         signal: AbortSignal.timeout(30000),
