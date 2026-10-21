@@ -134,6 +134,8 @@ variável `ALERTA_DIAS` no `.env`.
 | `BASE_TTL_MIN` | `30` | Minutos entre as buscas dos leads de hoje, no expediente. |
 | `ALERTA_DIAS` | `45` | Janela (dias) da varredura de leads parados. |
 | `EQUIPES_JSON` | — | Opcional. Equipes em JSON (substitui o `equipes.json`). |
+| `SUPREMO_RAJADA` | `20` | Consultas que podem sair de uma vez. |
+| `SUPREMO_INTERVALO_SEG` | `120` | Depois da rajada, uma consulta a cada tantos segundos. |
 | `KV_URL` | — | Recomendado no Render. URL do Key Value (Redis) onde o cache sobrevive às publicações. |
 
 ### Agenda de consultas ao Supremo
@@ -148,6 +150,11 @@ uma agenda (horário de Maceió) em vez de baixar tudo o tempo todo:
 | Vendidos | junto com a das 17h |
 | Mês anterior | uma vez por dia |
 | Noite e domingo | nada |
+
+As consultas seguem um orçamento: até 20 de uma vez e, depois, uma a cada 2 minutos
+(`SUPREMO_RAJADA` e `SUPREMO_INTERVALO_SEG`), porque o Supremo aguenta só umas 30
+seguidas. Se a busca for interrompida por um bloqueio, a próxima continua da página
+onde parou. O estado fica em `/api/status`.
 
 Ranking, semana, funil, leads parados e evolução são calculados dessas bases, sem
 nova consulta (~200 páginas por dia). Se vier um 429, a busca para na hora e nenhuma

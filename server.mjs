@@ -9,7 +9,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fetchLeadsPorPeriodo, fetchVendidos, statusLimite } from "./src/supremo.mjs";
+import { fetchLeadsPorPeriodo, fetchVendidos, statusLimite, orcamento, buscasIncompletas } from "./src/supremo.mjs";
 import { agregar, escanearParados, agregarEvolucao } from "./src/aggregate.mjs";
 import { criarArmazem } from "./src/armazem.mjs";
 
@@ -229,6 +229,8 @@ function statusServidor() {
     renovando, renovandoDesde: renovando ? h(renovandoDesde) : null, ultimaAgenda: h(ultimaAgenda),
     erroAgenda: erroAgenda && { em: h(erroAgenda.em), msg: erroAgenda.msg }, buscasEmAndamento: [...emVoo.keys()],
     supremo: { pausadoAte: lim.pausado ? h(lim.retomaEm) : null, ultimoSucesso: h(lim.ultimoSucesso), ultimo429: h(lim.ultimo429), consultasDesdeQueLigou: lim.consultas },
+    orcamento: (() => { const o = orcamento(); return { fichas: o.fichas, rajada: o.rajada, umaACada: `${o.intervaloSeg}s`, proximaFicha: h(o.proximaFicha) }; })(),
+    buscasIncompletas: buscasIncompletas(),
     keyValue: !!armazem,
   };
 }

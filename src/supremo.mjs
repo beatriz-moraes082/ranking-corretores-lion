@@ -16,6 +16,23 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const MIN_INTERVALO_MS = 1050;
 let ultimaChamada = 0;
 let fila = Promise.resolve();
+// Orçamento de consultas: o Supremo aguenta umas 30 seguidas e depois demora horas
+// para liberar. Então guardamos "fichas": até SUPREMO_RAJADA (20) de uma vez e,
+// gastas, uma nova a cada SUPREMO_INTERVALO_SEG (120 s). Espalha as buscas ao
+// longo do dia em vez de fazer rajadas.
+const RAJADA = Number(process.env.SUPREMO_RAJADA) || 20;
+const RECARGA_MS = (Number(process.env.SUPREMO_INTERVALO_SEG) || 120) * 1000;
+let fichas = RAJADA, ultimaRecarga = Date.now();
+function recarregar() {
+  const agora = Date.now();
+  const novas = Math.floor((agora - ultimaRecarga) / RECARGA_MS);
+  if (novas > 0) { fichas = Math.min(RAJADA, fichas + novas); ultimaRecarga += novas * RECARGA_MS; }
+  if (fichas >= RAJADA) ultimaRecarga = agora;
+}
+export function orcamento() {
+  recarregar();
+  return { fichas, rajada: RAJADA, intervaloSeg: RECARGA_MS / 1000, proximaFicha: fichas >= RAJADA ? null : ultimaRecarga + RECARGA_MS };
+}
 // Freio global: quando o Supremo responde 429, a busca para na hora (não insiste)
 // e nenhuma consulta sai por 30 min; se o 429 se repetir, 60 min. Zera no primeiro
 // sucesso. Insistir mantém o bloqueio ativo indefinidamente.
@@ -26,6 +43,7 @@ function registrar429() {
   ultimo429 = Date.now();
   pausaAtual = pausaAtual ? Math.min(PAUSA_MAX, pausaAtual * 2) : PAUSA_MIN;
   pausaAte = Date.now() + pausaAtual;
+  fichas = 0; ultimaRecarga = Date.now(); // o balde do Supremo está vazio
   console.warn(`  [supremo] 429: pausando consultas por ${Math.round(pausaAtual / 60000)} min`);
 }
 function registrarSucesso() {
@@ -55,10 +73,18 @@ function throttle() {
       e.bloqueio = true;
       throw e;
     }
-    const espera = MIN_INTERVALO_MS - (Date.now() - ultimaChamada);
-    if (espera > 0) await sleep(espera);
-    ultimaChamada = Date.now();
-    liberar();
+    try {
+      recarregar();
+      if (fichas < 1) await sleep(ultimaRecarga + RECARGA_MS - Date.now());
+      recarregar();
+      if (Date.now() < pausaAte) { const e = new BloqueioSupremo("Supremo bloqueado durante a fila"); e.bloqueio = true; throw e; }
+      const espera = MIN_INTERVALO_MS - (Date.now() - ultimaChamada);
+      if (espera > 0) await sleep(espera);
+      fichas = Math.max(0, fichas - 1);
+      ultimaChamada = Date.now();
+    } finally {
+      liberar();
+    }
   });
 }
 
@@ -102,19 +128,6 @@ async function fetchPage(path, token, { retries = 10 } = {}) {
   throw lastErr;
 }
 
-// Executa tarefas com um limite de concorrencia.
-async function pool(items, worker, concurrency = 4) {
-  const results = new Array(items.length);
-  let idx = 0;
-  const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
-    while (idx < items.length) {
-      const i = idx++;
-      results[i] = await worker(items[i], i);
-    }
-  });
-  await Promise.all(runners);
-  return results;
-}
 
 // Monta a query string a partir de um objeto de filtros (ignora null/undefined).
 function qs(params = {}) {
@@ -128,21 +141,35 @@ function qs(params = {}) {
 
 // Busca TODAS as paginas de um recurso paginado aplicando filtros.
 // maxPaginas protege contra buscas gigantes acidentais.
-export async function fetchAll(resource, token, filtros = {}, { maxPaginas = 5000, concurrency = 1 } = {}) {
-  const first = await fetchPage(`/${resource}${qs({ ...filtros, pagina: 1 })}`, token);
-  const totalPaginas = Math.min(first.totalPaginas || 1, maxPaginas);
-  const rows = [...first.data];
-  if (totalPaginas <= 1) return { rows, total: first.total ?? rows.length, totalPaginas };
-
-  const restantes = [];
-  for (let p = 2; p <= totalPaginas; p++) restantes.push(p);
-  const pages = await pool(
-    restantes,
-    (p) => fetchPage(`/${resource}${qs({ ...filtros, pagina: p })}`, token),
-    concurrency
-  );
-  for (const pg of pages) if (pg?.data) rows.push(...pg.data);
-  return { rows, total: first.total ?? rows.length, totalPaginas };
+// Páginas já baixadas de uma busca interrompida (bloqueio no meio): a próxima
+// tentativa continua de onde parou em vez de recomeçar. Vale por 3 h.
+const progresso = new Map(); // chave da busca -> { ts, totalPaginas, paginas: Map }
+const PROGRESSO_TTL = 3 * 60 * 60 * 1000;
+export function buscasIncompletas() {
+  return [...progresso.entries()].map(([k, v]) => ({ busca: k, paginas: `${v.paginas.size}/${v.totalPaginas}` }));
+}
+export async function fetchAll(resource, token, filtros = {}, { maxPaginas = 5000 } = {}) {
+  const chave = `${resource}${qs(filtros)}`;
+  let prog = progresso.get(chave);
+  if (!prog || Date.now() - prog.ts > PROGRESSO_TTL) { prog = { ts: Date.now(), totalPaginas: null, paginas: new Map() }; progresso.set(chave, prog); }
+  if (!prog.paginas.has(1)) {
+    const first = await fetchPage(`/${resource}${qs({ ...filtros, pagina: 1 })}`, token);
+    prog.totalPaginas = Math.min(first.totalPaginas || 1, maxPaginas);
+    prog.paginas.set(1, first.data);
+  }
+  for (let p = 2; p <= prog.totalPaginas; p++) {
+    if (prog.paginas.has(p)) continue;
+    const pg = await fetchPage(`/${resource}${qs({ ...filtros, pagina: p })}`, token);
+    prog.paginas.set(p, pg.data);
+  }
+  progresso.delete(chave);
+  // junta as páginas sem repetir lead (a ordem pode mudar entre uma página e outra)
+  const vistos = new Set(), rows = [];
+  for (let p = 1; p <= prog.totalPaginas; p++) for (const r of prog.paginas.get(p) || []) {
+    const id = r.id ?? JSON.stringify(r);
+    if (!vistos.has(id)) { vistos.add(id); rows.push(r); }
+  }
+  return { rows, total: rows.length, totalPaginas: prog.totalPaginas };
 }
 
 // Leads capturados num intervalo (filtro por data_captura).
