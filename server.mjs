@@ -273,10 +273,12 @@ async function calcularRanking(inicio, fim) {
     }
     // Sem a lista de vendidos (bloqueio no meio da busca), o ranking sai mesmo assim
     // com os leads já baixados; só as vendas ficam marcadas como indisponíveis.
+    // Com o orçamento de consultas, a lista de vendidos pode levar quase 1 h para
+    // chegar; o ranking não espera: sai sem as vendas e a busca segue em segundo plano.
     let vendidos = vendidosCache?.rows, semVendas = false;
     if (!vendidos) {
-      try { vendidos = (await garantirVendidos()).rows; }
-      catch (e) { if (!e.bloqueio) throw e; vendidos = []; semVendas = true; }
+      buscarVendidos().catch(() => {});
+      vendidos = []; semVendas = true;
     }
     data = agregar({ leadsPeriodo, vendidos, periodo: { inicio: new Date(`${inicio}T00:00:00`), fim: new Date(`${fim}T23:59:59`) }, agora: new Date() });
     data.geradoEm = new Date(baseAtual ? Math.max(baseAtual.ts, baseAtual.tsHoje || 0) : Date.now()).toISOString();
