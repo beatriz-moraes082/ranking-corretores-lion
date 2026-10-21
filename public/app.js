@@ -259,7 +259,7 @@ function renderRanking(d, perfis) {
   const kpis = [
     { rot: "Leads no período", ico: "", cor: "var(--c3)", val: r.leads, sub: `${r.corretoresAtivos} corretores ativos` },
     { rot: "Propostas", ico: "", cor: "var(--c2)", val: r.propostas ?? d.corretores.reduce((s, x) => s + (x.propostas || 0), 0), sub: "leads que chegaram em proposta" },
-    { rot: "Vendas fechadas", ico: "", cor: "var(--gold)", val: r.vendas, sub: `conversão ${r.conversaoGeral}%` },
+    { rot: "Vendas fechadas", ico: "", cor: "var(--gold)", val: r.vendas, sub: d.vendasIndisponiveis ? "aguardando o Supremo liberar" : `conversão ${r.conversaoGeral}%` },
     { rot: "VGV vendido", ico: "", cor: "var(--c4)", val: r.vgv, money: true, sub: `ticket ${brlK(r.ticketMedio)}` },
     { rot: "Parados +15 dias", ico: "", cor: "var(--c5)", val: r.parados15d, sub: d.alertasProntos ? "precisam de ação" : "calculando…" },
   ];

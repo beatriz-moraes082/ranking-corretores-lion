@@ -269,9 +269,17 @@ async function calcularRanking(inicio, fim) {
       if (av && fresco(av, ANTERIOR_TTL)) return aplicarAlertas(av.data);
       leadsPeriodo = enxugar((await umaVez(`avulso:${inicio}|${fim}`, () => fetchLeadsPorPeriodo(TOKEN, inicio, fim))).rows);
     }
-    const vendidos = (await garantirVendidos()).rows;
+    // Sem a lista de vendidos (bloqueio no meio da busca), o ranking sai mesmo assim
+    // com os leads já baixados; só as vendas ficam marcadas como indisponíveis.
+    let vendidos = vendidosCache?.rows, semVendas = false;
+    if (!vendidos) {
+      try { vendidos = (await garantirVendidos()).rows; }
+      catch (e) { if (!e.bloqueio) throw e; vendidos = []; semVendas = true; }
+    }
     data = agregar({ leadsPeriodo, vendidos, periodo: { inicio: new Date(`${inicio}T00:00:00`), fim: new Date(`${fim}T23:59:59`) }, agora: new Date() });
     data.geradoEm = new Date(baseAtual ? Math.max(baseAtual.ts, baseAtual.tsHoje || 0) : Date.now()).toISOString();
+    data.vendasIndisponiveis = semVendas;
+    if (semVendas) return aplicarAlertas(data); // não guarda: recalcula quando as vendas chegarem
     if (cobre(inicio, fim)) memo.set(chave, data);
     else { avulsos.set(`${inicio}|${fim}`, { ts: Date.now(), data }); persistir(); }
   }
