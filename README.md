@@ -137,6 +137,11 @@ variável `ALERTA_DIAS` no `.env`.
 | `SUPREMO_RAJADA` | `20` | Consultas que podem sair de uma vez. |
 | `SUPREMO_INTERVALO_SEG` | `120` | Depois da rajada, uma consulta a cada tantos segundos. |
 | `KV_URL` | — | Recomendado no Render. URL do Key Value (Redis) onde o cache sobrevive às publicações. |
+| `CLICKUP_TOKEN` | — | Opcional. Token da API do ClickUp para o resumo semanal de propostas. |
+| `CLICKUP_LISTA_PROPOSTAS` | — | ID da lista do ClickUp onde o resumo é criado. |
+| `CLICKUP_RESPONSAVEL` | — | Opcional. ID do usuário do ClickUp que recebe a tarefa. |
+| `CLICKUP_CAMPO_CLIENTE` | — | Opcional. `idDoCampo=idDaOpcao` de um campo de lista suspensa (ex.: Clientes = Lion Imob). |
+| `RESUMO_DIA` / `RESUMO_HORA` | `1` / `9` | Dia da semana (0 = domingo) e hora do resumo. |
 
 ### Agenda de consultas ao Supremo
 
@@ -174,6 +179,25 @@ Supremo bloqueia temporariamente quando recebe consultas demais (HTTP 429).
 Com isso o servidor sobe já com os dados e só consulta o Supremo o que estiver vencido.
 Além disso, o navegador da TV guarda os últimos dados: se o servidor ou o Supremo
 ficarem fora, a TV continua mostrando o último ranking com "reconectando…".
+
+### Resumo semanal de propostas x campanhas (ClickUp)
+
+Toda segunda, a partir das 9h, o servidor cria uma tarefa no ClickUp com as propostas
+novas e a campanha de origem de cada lead (campo `nome_campanha` do Supremo), para o
+assessor de tráfego cruzar proposta com campanha. Semana sem proposta nova não gera
+tarefa. Não faz nenhuma consulta extra ao Supremo: usa os leads que o painel já tem.
+
+- **Proposta** = lead em situação de Proposta ou que virou venda (mesma regra do funil).
+- **Nova** = ainda não saiu em resumo anterior. O servidor lê os resumos já criados na
+  lista (etiqueta `resumo-propostas`, cada lead aparece como `lead #ID`), então não
+  repete leads nem cria dois resumos na mesma semana, mesmo depois de reiniciar.
+- Entram os leads captados no mês atual e no anterior. O primeiro resumo traz todas as
+  propostas desse período.
+- Prévia sem criar nada: `/api/resumo-propostas?formato=texto`.
+
+Para ligar, no serviço `elite-lion` → **Environment**: `CLICKUP_TOKEN` (ClickUp →
+Settings → Apps → API Token), `CLICKUP_LISTA_PROPOSTAS` e, se quiser, `CLICKUP_RESPONSAVEL`.
+O estado aparece em `/api/status` → `resumoPropostas`.
 
 ---
 

@@ -19,6 +19,15 @@ services:
         value: "30"
       - key: ALERTA_DIAS
         value: "45"
+      # Resumo semanal de propostas x campanhas no ClickUp (opcional)
+      - key: CLICKUP_TOKEN
+        sync: false
+      - key: CLICKUP_LISTA_PROPOSTAS
+        value: "901001858774"   # Gestão das Campanhas
+      - key: CLICKUP_CAMPO_CLIENTE
+        value: "d0675bf9-78f7-43e7-b777-ba95da309229=3cd7a983-1cfb-4678-be56-3ce1d63abcd8"   # Clientes = Lion Imob
+      - key: CLICKUP_RESPONSAVEL
+        value: "118097732"   # Josiel Neto
       # Cache persistente: sem ele, toda publicação busca tudo de novo no Supremo
       # (que bloqueia quando são consultas demais). Aponta para o Key Value abaixo.
       - key: KV_URL

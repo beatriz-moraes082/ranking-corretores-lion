@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { fetchLeadsPorPeriodo, fetchVendidos, statusLimite, orcamento, buscasIncompletas } from "./src/supremo.mjs";
 import { agregar, escanearParados, agregarEvolucao } from "./src/aggregate.mjs";
 import { criarArmazem } from "./src/armazem.mjs";
+import { montarResumo, marcaResumo, tituloResumo, textoResumo, idsNoTexto, resumosAnteriores, criarTarefa } from "./src/resumo-propostas.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
@@ -70,7 +71,7 @@ const emVoo = new Map();   // dedupe de buscas simultâneas
 // Só os campos que o painel usa (sem "interesses"/"anotacoes", que são textos longos).
 const CAMPOS = ["nome_pessoa", "telefone_pessoa", "nome_origem", "data_captura", "data_qualificado", "data_com_corretor",
   "data_ultima_interacao", "nome_qualificador", "nome_corretor", "nome_status", "etapa", "nome_etapa",
-  "data_vendido_perdido", "nome_situacao", "valor_vendido", "motivo_perda", "id"];
+  "data_vendido_perdido", "nome_situacao", "valor_vendido", "motivo_perda", "id", "nome_campanha", "nome_empreendimento"];
 const enxugar = (rows) => rows.map((r) => Object.fromEntries(CAMPOS.map((k) => [k, r[k] ?? null])));
 
 function faixas(hoje = new Date()) {
@@ -216,6 +217,63 @@ async function renovar() {
   } finally {
     renovando = false;
   }
+  await resumoSemanal().catch(() => {});
+}
+
+// --- resumo semanal de propostas x campanhas (tarefa no ClickUp) ---
+// Toda segunda (RESUMO_DIA) a partir das 9h (RESUMO_HORA), depois que o mês atual
+// foi baixado no dia. Só cria a tarefa se houver proposta nova.
+const RESUMO = {
+  token: process.env.CLICKUP_TOKEN,
+  lista: process.env.CLICKUP_LISTA_PROPOSTAS,
+  responsavel: process.env.CLICKUP_RESPONSAVEL,
+  campo: process.env.CLICKUP_CAMPO_CLIENTE,
+  dia: Number(process.env.RESUMO_DIA ?? 1),
+  hora: Number(process.env.RESUMO_HORA ?? 9),
+};
+const resumoAtivo = !!(RESUMO.token && RESUMO.lista);
+let resumoFeito = null, resumoTentativa = 0, resumoUltimo = null, resumoErro = null;
+function semanaPassada(agora = new Date()) {
+  const fim = new Date(agora); fim.setDate(agora.getDate() - 1);
+  const inicio = new Date(agora); inicio.setDate(agora.getDate() - 7);
+  return { inicio: isoDate(inicio), fim: isoDate(fim) };
+}
+function calcularResumo(jaEnviados, agora = new Date()) {
+  const s = semanaPassada(agora);
+  const baseInicio = (baseAnterior || baseAtual).inicio;
+  const leads = linhasEntre(baseInicio, isoDate(agora));
+  return montarResumo({ leads, jaEnviados, periodo: { ...s, baseInicio, baseFim: isoDate(agora) } });
+}
+async function resumoSemanal(agora = new Date()) {
+  if (!resumoAtivo) return;
+  const m = momento(agora);
+  const semana = semanaPassada(agora).inicio;
+  if (resumoFeito === semana || agora.getDay() !== RESUMO.dia || agora.getHours() < RESUMO.hora || !m.expediente) return;
+  // dados do dia: base do mês baixada hoje e mês anterior presente
+  if (!baseAtual || baseAtual.dia !== m.hoje || !baseAnterior) return;
+  if (Date.now() - resumoTentativa < 60 * 60 * 1000) return; // falhou há pouco: tenta de hora em hora
+  resumoTentativa = Date.now();
+  try {
+    const anteriores = await resumosAnteriores(RESUMO.token, RESUMO.lista);
+    const r = calcularResumo(new Set(anteriores.flatMap((t) => idsNoTexto(t.markdown_description || t.description))), agora);
+    const nome = tituloResumo(r);
+    const marca = marcaResumo(r);
+    if (anteriores.some((t) => (t.name || "").startsWith(marca))) {
+      resumoFeito = semana;
+    } else if (!r.novas) {
+      console.log("  [resumo] nenhuma proposta nova na semana; nada criado");
+      resumoFeito = semana; resumoUltimo = { em: Date.now(), novas: 0 };
+    } else {
+      const prazo = new Date(agora); prazo.setHours(18, 0, 0, 0);
+      const t = await criarTarefa(RESUMO.token, RESUMO.lista, { nome, texto: textoResumo(r), responsavel: RESUMO.responsavel, campo: RESUMO.campo, prazo: prazo.getTime() });
+      console.log(`  [resumo] tarefa criada no ClickUp: ${t.url || t.id} (${r.novas} propostas)`);
+      resumoFeito = semana; resumoUltimo = { em: Date.now(), novas: r.novas, url: t.url || null };
+    }
+    resumoErro = null;
+  } catch (e) {
+    resumoErro = { em: Date.now(), msg: e.message };
+    console.error("  [resumo]", e.message);
+  }
 }
 
 // Diagnóstico sem consultar o Supremo: /api/status
@@ -232,6 +290,11 @@ function statusServidor() {
     orcamento: (() => { const o = orcamento(); return { fichas: o.fichas, rajada: o.rajada, umaACada: `${o.intervaloSeg}s`, proximaFicha: h(o.proximaFicha) }; })(),
     buscasIncompletas: buscasIncompletas(),
     keyValue: !!armazem,
+    resumoPropostas: {
+      ativo: resumoAtivo, semanaFeita: resumoFeito,
+      ultimo: resumoUltimo && { ...resumoUltimo, em: h(resumoUltimo.em) },
+      erro: resumoErro && { em: h(resumoErro.em), msg: resumoErro.msg },
+    },
   };
 }
 
@@ -384,6 +447,19 @@ const server = createServer(async (req, res) => {
     if (url.pathname === "/api/equipes") {
       res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-cache" });
       return res.end(JSON.stringify(lerEquipes()));
+    }
+
+    // Prévia do resumo semanal (o que entraria se fosse o primeiro resumo).
+    // Não escreve nada no ClickUp.
+    if (url.pathname === "/api/resumo-propostas") {
+      if (!baseAtual) {
+        res.writeHead(202, { "content-type": "application/json; charset=utf-8" });
+        return res.end(JSON.stringify({ pendente: true }));
+      }
+      const r = calcularResumo(new Set());
+      const formato = url.searchParams.get("formato");
+      res.writeHead(200, { "content-type": `${formato === "texto" ? "text/plain" : "application/json"}; charset=utf-8`, "cache-control": "no-cache" });
+      return res.end(formato === "texto" ? `${tituloResumo(r)}\n\n${textoResumo(r)}` : JSON.stringify(r));
     }
 
     if (url.pathname === "/api/evolucao") {
