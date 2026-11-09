@@ -137,6 +137,7 @@ variável `ALERTA_DIAS` no `.env`.
 | `SUPREMO_RAJADA` | `20` | Consultas que podem sair de uma vez. |
 | `SUPREMO_INTERVALO_SEG` | `120` | Depois da rajada, uma consulta a cada tantos segundos. |
 | `KV_URL` | — | Recomendado no Render. URL do Key Value (Redis) onde o cache sobrevive às publicações. |
+| `HISTORICO_MESES` | `10` | Meses guardados além do atual e do anterior. São baixados fora do expediente (um por vez), revistos a cada 14 dias e ficam no Key Value; períodos dentro dessa janela abrem na hora. Enquanto há mês para baixar, o servidor se visita a cada 10 min para não dormir. |
 | `CLICKUP_TOKEN` | — | Opcional. Token da API do ClickUp para o resumo semanal de propostas. |
 | `CLICKUP_LISTA_PROPOSTAS` | — | ID da lista do ClickUp onde o resumo é criado. |
 | `CLICKUP_RESPONSAVEL` | — | Opcional. ID do usuário do ClickUp que recebe a tarefa. |

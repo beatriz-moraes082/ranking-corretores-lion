@@ -204,7 +204,10 @@ async function carregar({ soft = false } = {}) {
 // Mostra o andamento e a previsão, e tenta de novo a cada minuto.
 const dataCurta = (s) => s.slice(8, 10) + "/" + s.slice(5, 7);
 function textoPreparando(p) {
-  const partes = p.partes.map((x) => `de ${dataCurta(x.inicio)} a ${dataCurta(x.fim)}${x.total ? ` (${x.feitas} de ${x.total} partes)` : ""}`).join(" e ");
+  const conhecidas = p.partes.filter((x) => x.total);
+  const soma = conhecidas.length === p.partes.length ? ` (${conhecidas.reduce((n, x) => n + x.feitas, 0)} de ${conhecidas.reduce((n, x) => n + x.total, 0)} partes)` : "";
+  const partes = p.partes.length > 2 ? `de ${p.partes.length} meses${soma}`
+    : p.partes.map((x) => `de ${dataCurta(x.inicio)} a ${dataCurta(x.fim)}${x.total ? ` (${x.feitas} de ${x.total} partes)` : ""}`).join(" e ");
   const hora = (iso) => new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
   const quando = p.pausadoAte ? `O Supremo pediu uma pausa nas consultas até ${hora(p.pausadoAte)}.`
     : p.previsao ? `Previsão: por volta das ${hora(p.previsao)}.` : "";

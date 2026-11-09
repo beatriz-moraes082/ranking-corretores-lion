@@ -174,19 +174,94 @@ function buscarVendidos() {
     return vendidosCache;
   });
 }
+// --- histórico: meses antigos guardados, um por chave (Key Value e disco) ---
+// Além do mês atual e do anterior, guarda HISTORICO_MESES meses para trás. Cada
+// mês é baixado uma vez, fora do expediente, e revisto a cada 14 dias (a situação
+// dos leads antigos ainda muda). Assim qualquer período nessa janela abre na hora.
+const HISTORICO_MESES = Number(process.env.HISTORICO_MESES ?? 10);
+const HIST_REVER = 14 * 24 * 60 * 60 * 1000;
+const HIST_VALIDADE = 3 * 24 * 60 * 60 * 1000; // páginas de um mês pela metade servem por 3 dias
+const KV_HIST = "elite-lion:hist:";
+const historico = new Map(); // "YYYY-MM" -> { ts, mes, inicio, fim, rows }
+// Do mais recente (dois meses atrás) ao mais antigo.
+function mesesHistorico(hoje = new Date()) {
+  const out = [];
+  for (let i = 2; i < 2 + HISTORICO_MESES; i++) {
+    const ini = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
+    out.push({ mes: isoDate(ini).slice(0, 7), inicio: isoDate(ini), fim: isoDate(new Date(hoje.getFullYear(), hoje.getMonth() - i + 1, 0)) });
+  }
+  return out;
+}
+const arquivoMes = (mes) => join(CACHE_DIR, `hist-${mes}.json`);
+async function guardarMes(h) {
+  historico.set(h.mes, h);
+  memo.clear();
+  try { await mkdir(CACHE_DIR, { recursive: true }); await writeFile(arquivoMes(h.mes), JSON.stringify(h)); } catch {}
+  if (armazem) await armazem.set(KV_HIST + h.mes, JSON.stringify(h)).catch((e) => console.error(`  [kv] falha ao gravar ${h.mes}:`, e.message));
+}
+async function carregarHistorico() {
+  for (const m of mesesHistorico()) {
+    let h = null;
+    try { if (existsSync(arquivoMes(m.mes))) h = JSON.parse(readFileSync(arquivoMes(m.mes), "utf8")); } catch {}
+    if (armazem) {
+      try { const b = await armazem.get(KV_HIST + m.mes); if (b) { const k = JSON.parse(b); if (!h || k.ts > h.ts) h = k; } }
+      catch (e) { console.error(`  [kv] falha ao ler ${m.mes}:`, e.message); }
+    }
+    if (h?.rows) historico.set(m.mes, h);
+  }
+  console.log(`  histórico: ${historico.size} de ${HISTORICO_MESES} meses guardados`);
+}
+// noturna: para quando começa o expediente (as páginas baixadas ficam para a próxima)
+function buscarMes(m, { noturna = false } = {}) {
+  return umaVez(`hist:${m.mes}`, async () => {
+    const { rows } = await fetchLeadsPorPeriodo(TOKEN, m.inicio, m.fim, { validade: HIST_VALIDADE, parar: noturna ? () => momento().expediente : null });
+    await guardarMes({ ts: Date.now(), ...m, rows: enxugar(rows) });
+    console.log(`  [dados] histórico ${m.mes}: ${rows.length} leads`);
+  });
+}
+// Próximo mês a baixar: primeiro os que faltam (do mais recente), depois o mais desatualizado.
+function proximoMes() {
+  const meses = mesesHistorico();
+  return meses.find((m) => !historico.has(m.mes))
+    || meses.filter((m) => Date.now() - historico.get(m.mes).ts > HIST_REVER).sort((a, b) => historico.get(a.mes).ts - historico.get(b.mes).ts)[0]
+    || null;
+}
+// No plano grátis o Render desliga o servidor depois de 15 min sem visitas, e a
+// busca da noite parava junto. Enquanto houver busca em andamento (ou mês antigo
+// para baixar fora do expediente), o servidor visita a si mesmo a cada 10 min;
+// sem trabalho, volta a dormir normalmente.
+function manterAcordado() {
+  const url = process.env.RENDER_EXTERNAL_URL;
+  if (!url) return;
+  if (emVoo.size || (!momento().expediente && proximoMes())) fetch(`${url}/api/status`, { signal: AbortSignal.timeout(30000) }).catch(() => {});
+}
+
 // Renova o que venceu, em sequência (é o único lugar que consulta o Supremo
 // periodicamente). Ordem: o que a TV mostra primeiro.
 // A agenda roda a cada 5 min, mas só consulta o Supremo quando algo está na hora.
 let renovando = false, renovandoDesde = 0, ultimaAgenda = null, erroAgenda = null;
 const iniciouEm = Date.now();
 async function renovar() {
-  // trava de segurança: uma rodada presa há mais de 20 min é liberada
-  if (renovando && Date.now() - renovandoDesde > 20 * 60 * 1000) { console.warn("  [dados] agenda presa, liberando"); renovando = false; emVoo.clear(); }
+  // trava de segurança: uma rodada sem nenhuma consulta bem-sucedida há 20 min é
+  // liberada (com o limite de consultas, uma rodada normal passa de 1 h)
+  if (renovando && Date.now() - Math.max(renovandoDesde, statusLimite().ultimoSucesso) > 20 * 60 * 1000) { console.warn("  [dados] agenda presa, liberando"); renovando = false; emVoo.clear(); }
   if (renovando || statusLimite().pausado) return;
   renovando = true; renovandoDesde = Date.now(); ultimaAgenda = Date.now();
   try {
     const f = faixas();
     const m = momento();
+    // 0) virou o mês: o anterior vai para o histórico e o mês que acabou vira o
+    //    anterior (sem esperar baixar tudo de novo; ele é revisto à noite)
+    if (baseAnterior && !baseValida(baseAnterior, f.anterior)) {
+      const mes = baseAnterior.inicio.slice(0, 7);
+      if (mesesHistorico().some((x) => x.mes === mes) && !(historico.get(mes)?.ts > baseAnterior.ts))
+        await guardarMes({ ts: baseAnterior.ts, mes, inicio: baseAnterior.inicio, fim: baseAnterior.fim, rows: baseAnterior.rows });
+    }
+    if (baseAtual && baseAtual.inicio === f.anterior.inicio) {
+      baseAnterior = { ...baseAtual, fim: f.anterior.fim, dia: "" };
+      baseAtual = null;
+      memo.clear();
+    }
     // 1) falta alguma base (servidor acabou de subir ou virou o mês): busca já
     if (!baseValida(baseAtual, f.atual)) await buscarBase("atual");
     if (!vendidosCache) await buscarVendidos();
@@ -209,6 +284,11 @@ async function renovar() {
     console.error("  [dados] agenda:", e.message);
   } finally {
     renovando = false;
+  }
+  // 5) fora do expediente, sem outra busca: um mês do histórico por vez
+  if (!momento().expediente && !emVoo.size && !statusLimite().pausado) {
+    const p = proximoMes();
+    if (p) buscarMes(p, { noturna: true }).catch((e) => console.error(`  [dados] histórico ${p.mes}:`, e.message));
   }
   await resumoSemanal().catch(() => {});
 }
@@ -283,6 +363,11 @@ function statusServidor() {
     orcamento: (() => { const o = orcamento(); return { fichas: o.fichas, rajada: o.rajada, umaACada: `${o.intervaloSeg}s`, proximaFicha: h(o.proximaFicha) }; })(),
     buscasIncompletas: buscasIncompletas(),
     keyValue: !!armazem,
+    historico: {
+      meses: HISTORICO_MESES,
+      guardados: mesesHistorico().filter((x) => historico.has(x.mes)).map((x) => ({ mes: x.mes, leads: historico.get(x.mes).rows.length, em: h(historico.get(x.mes).ts) })),
+      faltam: mesesHistorico().filter((x) => !historico.has(x.mes)).map((x) => x.mes),
+    },
     resumoPropostas: {
       ativo: resumoAtivo, semanaFeita: resumoFeito,
       ultimo: resumoUltimo && { ...resumoUltimo, em: h(resumoUltimo.em) },
@@ -296,10 +381,12 @@ const memo = new Map(); // resultados derivados; zera quando uma base muda
 const dia = (s) => (s ? String(s).slice(0, 10) : "");
 function linhasEntre(inicio, fim) {
   const out = [];
-  for (const b of [baseAnterior, baseAtual]) if (b) for (const r of b.rows) { const d = dia(r.data_captura); if (d >= inicio && d <= fim) out.push(r); }
+  const meses = [...historico.values()].filter((h) => h.fim >= inicio && h.inicio <= fim);
+  for (const b of [...meses, baseAnterior, baseAtual]) if (b) for (const r of b.rows) { const d = dia(r.data_captura); if (d >= inicio && d <= fim) out.push(r); }
   return out;
 }
-const cobre = (inicio, fim) => { const f = faixas(); return inicio >= f.anterior.inicio && fim <= f.atual.fim; };
+// Períodos dentro da janela (histórico + mês anterior + atual) saem das bases guardadas.
+const cobre = (inicio, fim) => inicio >= (mesesHistorico().at(-1)?.inicio ?? faixas().anterior.inicio) && fim <= faixas().atual.fim;
 
 function alertasAtuais() {
   if (memo.has("alertas")) return memo.get("alertas");
@@ -344,10 +431,12 @@ async function calcularRanking(inicio, fim) {
       const f = faixas();
       const faltam = [];
       if (fim >= f.atual.inicio && !baseValida(baseAtual, f.atual)) faltam.push("atual");
-      if (inicio < f.atual.inicio && !baseValida(baseAnterior, f.anterior)) faltam.push("anterior");
-      if (faltam.length) {
+      if (inicio < f.atual.inicio && fim >= f.anterior.inicio && !baseValida(baseAnterior, f.anterior)) faltam.push("anterior");
+      const mesesFaltando = mesesHistorico().filter((x) => x.fim >= inicio && x.inicio <= fim && !historico.has(x.mes));
+      if (faltam.length || mesesFaltando.length) {
         for (const q of faltam) buscarBase(q).catch(() => {});
-        throw new Preparando(faltam.map((q) => f[q]));
+        for (const x of mesesFaltando) buscarMes(x).catch(() => {});
+        throw new Preparando([...faltam.map((q) => f[q]), ...mesesFaltando]);
       }
       leadsPeriodo = linhasEntre(inicio, fim);
     } else {
@@ -546,9 +635,11 @@ server.listen(PORT, async () => {
   console.log(armazem ? "  armazém persistente: Render Key Value (KV_URL)" : "  armazém persistente: não configurado (defina KV_URL)");
   carregarCacheDisco();
   await carregarCacheKV();
+  await carregarHistorico();
   // Renova o que estiver vencido agora e depois a cada 5 min (cada base só é
   // baixada de novo quando passa do seu prazo).
   renovar();
   setInterval(renovar, 5 * 60 * 1000);
+  setInterval(manterAcordado, 10 * 60 * 1000);
   console.log("");
 });

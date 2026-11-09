@@ -159,10 +159,13 @@ export function paginasPendentes() {
   for (const v of progresso.values()) if (v.totalPaginas) n += v.totalPaginas - v.paginas.size;
   return n;
 }
-export async function fetchAll(resource, token, filtros = {}, { maxPaginas = 5000 } = {}) {
+// validade: por quanto tempo as páginas já baixadas servem para retomar (meses
+// antigos mudam pouco e podem levar mais de uma noite). parar: interrompe entre
+// uma página e outra (ex.: busca noturna quando começa o expediente).
+export async function fetchAll(resource, token, filtros = {}, { maxPaginas = 5000, validade = PROGRESSO_TTL, parar = null } = {}) {
   const chave = `${resource}${qs(filtros)}`;
   let prog = progresso.get(chave);
-  if (!prog || Date.now() - prog.ts > PROGRESSO_TTL) { prog = { ts: Date.now(), totalPaginas: null, paginas: new Map() }; progresso.set(chave, prog); }
+  if (!prog || Date.now() - prog.ts > validade) { prog = { ts: Date.now(), totalPaginas: null, paginas: new Map() }; progresso.set(chave, prog); }
   if (!prog.paginas.has(1)) {
     const first = await fetchPage(`/${resource}${qs({ ...filtros, pagina: 1 })}`, token);
     prog.totalPaginas = Math.min(first.totalPaginas || 1, maxPaginas);
@@ -170,6 +173,7 @@ export async function fetchAll(resource, token, filtros = {}, { maxPaginas = 500
   }
   for (let p = 2; p <= prog.totalPaginas; p++) {
     if (prog.paginas.has(p)) continue;
+    if (parar?.()) throw new Error(`busca pausada em ${prog.paginas.size}/${prog.totalPaginas} páginas`);
     const pg = await fetchPage(`/${resource}${qs({ ...filtros, pagina: p })}`, token);
     prog.paginas.set(p, pg.data);
   }
