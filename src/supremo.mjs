@@ -148,6 +148,17 @@ const PROGRESSO_TTL = 3 * 60 * 60 * 1000;
 export function buscasIncompletas() {
   return [...progresso.entries()].map(([k, v]) => ({ busca: k, paginas: `${v.paginas.size}/${v.totalPaginas}` }));
 }
+// Andamento da busca de leads de um período (null se ainda não começou).
+export function andamentoPeriodo(inicio, fim) {
+  const v = progresso.get(`leads${qs({ data_inicio: inicio, data_fim: fim })}`);
+  return v && v.totalPaginas ? { feitas: v.paginas.size, total: v.totalPaginas } : null;
+}
+// Páginas que ainda faltam em todas as buscas em andamento (para a previsão).
+export function paginasPendentes() {
+  let n = 0;
+  for (const v of progresso.values()) if (v.totalPaginas) n += v.totalPaginas - v.paginas.size;
+  return n;
+}
 export async function fetchAll(resource, token, filtros = {}, { maxPaginas = 5000 } = {}) {
   const chave = `${resource}${qs(filtros)}`;
   let prog = progresso.get(chave);

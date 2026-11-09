@@ -182,6 +182,8 @@ async function carregar({ soft = false } = {}) {
     const r = await fetch(`/api/ranking?inicio=${inicio}&fim=${fim}`, { signal: AbortSignal.timeout(90000) });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detalhe || data.erro || "Falha");
+    if (r.status === 202) return mostrarPreparando(data, chave);
+    estado.preparando = null;
     estado.data = data; estado.dataChave = chave; estado.semConexao = false;
     if (Array.isArray(data.equipes)) estado.equipes = data.equipes; else if (estado.equipes) data.equipes = estado.equipes;
     salvarLocal("ranking", { chave, data });
@@ -195,6 +197,28 @@ async function carregar({ soft = false } = {}) {
     if (estado.data) { estado.semConexao = true; render(); return; }
     if (!soft) $("#conteudo").innerHTML = `<div class="erro"><b>Não consegui carregar.</b><br>${esc(e.message)}<br><small>Tentando de novo em 1 minuto.</small></div>`;
   }
+}
+
+// O servidor ainda está baixando do Supremo os leads do período (depois de
+// reiniciar, um mês inteiro leva mais de 1 h por causa do limite de consultas).
+// Mostra o andamento e a previsão, e tenta de novo a cada minuto.
+const dataCurta = (s) => s.slice(8, 10) + "/" + s.slice(5, 7);
+function textoPreparando(p) {
+  const partes = p.partes.map((x) => `de ${dataCurta(x.inicio)} a ${dataCurta(x.fim)}${x.total ? ` (${x.feitas} de ${x.total} partes)` : ""}`).join(" e ");
+  const hora = (iso) => new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  const quando = p.pausadoAte ? `O Supremo pediu uma pausa nas consultas até ${hora(p.pausadoAte)}.`
+    : p.previsao ? `Previsão: por volta das ${hora(p.previsao)}.` : "";
+  return { titulo: `Baixando do Supremo os leads ${partes}.`, quando };
+}
+function mostrarPreparando(p, chave) {
+  clearTimeout(retentativa);
+  retentativa = setTimeout(() => carregar({ soft: true }), 60_000);
+  estado.preparando = p;
+  if (estado.data && estado.dataChave === chave) return; // já tem dados guardados deste período na tela
+  estado.data = null;
+  const t = textoPreparando(p);
+  $("#conteudo").innerHTML = `<div class="carregando"><div class="loader"></div><p>${esc(t.titulo)}<br>${esc(t.quando)}<br><small>O painel atualiza sozinho quando terminar. O Supremo limita as consultas, por isso a primeira vez depois que o servidor reinicia demora.</small></p></div>`;
+  if (estado.view === "tv") renderTV();
 }
 
 /* ---------- render ---------- */
@@ -1119,7 +1143,8 @@ let tvTimer = null;
 function renderTV() {
   const tv = $("#tv");
   if (!estado.data) {
-    tv.innerHTML = `<div class="tv-carregando"><div class="loader"></div><p>Carregando o ranking da Lion…</p></div>`;
+    const t = estado.preparando && textoPreparando(estado.preparando);
+    tv.innerHTML = `<div class="tv-carregando"><div class="loader"></div><p>Carregando o ranking da Lion…${t ? `<br><small>${esc(t.titulo)} ${esc(t.quando)}</small>` : ""}</p></div>`;
     return;
   }
   const telas = telasTV(estado.data);

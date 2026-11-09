@@ -9,7 +9,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fetchLeadsPorPeriodo, fetchVendidos, statusLimite, orcamento, buscasIncompletas } from "./src/supremo.mjs";
+import { fetchLeadsPorPeriodo, fetchVendidos, statusLimite, orcamento, buscasIncompletas, andamentoPeriodo, paginasPendentes } from "./src/supremo.mjs";
 import { agregar, escanearParados, agregarEvolucao } from "./src/aggregate.mjs";
 import { criarArmazem } from "./src/armazem.mjs";
 import { montarResumo, marcaResumo, tituloResumo, textoResumo, idsNoTexto, resumosAnteriores, criarTarefa } from "./src/resumo-propostas.mjs";
@@ -66,6 +66,7 @@ let baseAtual = null;    // { ts, inicio, fim, rows }
 let baseAnterior = null; // { ts, inicio, fim, rows }
 let vendidosCache = null; // { ts, rows }
 const avulsos = new Map(); // "inicio|fim" -> { ts, data } (períodos fora das bases)
+const linhasAvulsas = new Map(); // "inicio|fim" -> leads recém-baixados, até virarem ranking em avulsos
 const emVoo = new Map();   // dedupe de buscas simultâneas
 
 // Só os campos que o painel usa (sem "interesses"/"anotacoes", que são textos longos).
@@ -172,14 +173,6 @@ function buscarVendidos() {
     persistir();
     return vendidosCache;
   });
-}
-// Garante a base (espera só se não existir nenhuma versão dela).
-async function garantirBase(qual) {
-  const b = qual === "atual" ? baseAtual : baseAnterior;
-  return baseValida(b, faixas()[qual]) ? b : buscarBase(qual);
-}
-async function garantirVendidos() {
-  return vendidosCache || buscarVendidos();
 }
 // Renova o que venceu, em sequência (é o único lugar que consulta o Supremo
 // periodicamente). Ordem: o que a TV mostra primeiro.
@@ -318,21 +311,57 @@ function alertasAtuais() {
   return r;
 }
 
+// Período cujos leads ainda estão vindo do Supremo. Com o limite de consultas, um
+// mês inteiro leva mais de 1 h depois que o servidor reinicia: em vez de segurar a
+// requisição (o navegador desiste antes e fica em "carregando"), a busca segue em
+// segundo plano e o painel recebe na hora o andamento e a previsão.
+class Preparando extends Error {
+  constructor(faixasPendentes) {
+    super("preparando");
+    const o = orcamento(), lim = statusLimite();
+    const partes = faixasPendentes.map((f) => ({ inicio: f.inicio, fim: f.fim, ...(andamentoPeriodo(f.inicio, f.fim) || { feitas: 0, total: null }) }));
+    const conhecido = partes.every((p) => p.total);
+    const espera = Math.max(0, paginasPendentes() - o.fichas) * o.intervaloSeg * 1000;
+    const desde = lim.pausado ? lim.retomaEm : Date.now();
+    this.info = { preparando: true, partes, previsao: conhecido ? new Date(desde + espera).toISOString() : null, pausadoAte: lim.pausado ? new Date(lim.retomaEm).toISOString() : null };
+  }
+}
+function buscarAvulso(inicio, fim) {
+  return umaVez(`avulso:${inicio}|${fim}`, async () => {
+    const { rows } = await fetchLeadsPorPeriodo(TOKEN, inicio, fim);
+    linhasAvulsas.set(`${inicio}|${fim}`, enxugar(rows));
+    memo.clear();
+  });
+}
+
 async function calcularRanking(inicio, fim) {
   const chave = `ranking:${inicio}|${fim}`;
   let data = memo.get(chave);
   if (!data) {
     let leadsPeriodo;
+    const k = `${inicio}|${fim}`;
     if (cobre(inicio, fim)) {
       const f = faixas();
-      await garantirBase("atual");
-      if (inicio < f.atual.inicio) await garantirBase("anterior");
+      const faltam = [];
+      if (fim >= f.atual.inicio && !baseValida(baseAtual, f.atual)) faltam.push("atual");
+      if (inicio < f.atual.inicio && !baseValida(baseAnterior, f.anterior)) faltam.push("anterior");
+      if (faltam.length) {
+        for (const q of faltam) buscarBase(q).catch(() => {});
+        throw new Preparando(faltam.map((q) => f[q]));
+      }
       leadsPeriodo = linhasEntre(inicio, fim);
     } else {
       // período fora das bases (raro): busca direta, com cache próprio
-      const av = avulsos.get(`${inicio}|${fim}`);
-      if (av && fresco(av, ANTERIOR_TTL)) return aplicarAlertas(av.data);
-      leadsPeriodo = enxugar((await umaVez(`avulso:${inicio}|${fim}`, () => fetchLeadsPorPeriodo(TOKEN, inicio, fim))).rows);
+      const av = avulsos.get(k);
+      if (av && !linhasAvulsas.has(k)) {
+        if (!fresco(av, ANTERIOR_TTL)) buscarAvulso(inicio, fim).catch(() => {});
+        return aplicarAlertas(av.data);
+      }
+      if (!linhasAvulsas.has(k)) {
+        buscarAvulso(inicio, fim).catch(() => {});
+        throw new Preparando([{ inicio, fim }]);
+      }
+      leadsPeriodo = linhasAvulsas.get(k);
     }
     // Sem a lista de vendidos (bloqueio no meio da busca), o ranking sai mesmo assim
     // com os leads já baixados; só as vendas ficam marcadas como indisponíveis.
@@ -348,7 +377,7 @@ async function calcularRanking(inicio, fim) {
     data.vendasIndisponiveis = semVendas;
     if (semVendas) return aplicarAlertas(data); // não guarda: recalcula quando as vendas chegarem
     if (cobre(inicio, fim)) memo.set(chave, data);
-    else { avulsos.set(`${inicio}|${fim}`, { ts: Date.now(), data }); persistir(); }
+    else { avulsos.set(k, { ts: Date.now(), data }); linhasAvulsas.delete(k); persistir(); }
   }
   return aplicarAlertas(data);
 }
@@ -426,12 +455,26 @@ const server = createServer(async (req, res) => {
       const hoje = new Date();
       const inicioMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
       const inicio = url.searchParams.get("inicio") || isoDate(inicioMes);
-      const fim = url.searchParams.get("fim") || isoDate(hoje);
+      let fim = url.searchParams.get("fim") || isoDate(hoje);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(inicio) || !/^\d{4}-\d{2}-\d{2}$/.test(fim)) {
         res.writeHead(400, { "content-type": "application/json" });
         return res.end(JSON.stringify({ erro: "Datas invalidas. Use inicio e fim no formato YYYY-MM-DD." }));
       }
-      const data = await calcularRanking(inicio, fim);
+      // fim no futuro (ex.: o mês inteiro) vira hoje: assim o período cai nas bases
+      // em vez de virar uma busca avulsa no Supremo
+      if (fim > isoDate(hoje)) fim = isoDate(hoje);
+      if (inicio > fim) {
+        res.writeHead(400, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ erro: "A data de início é depois da data de fim." }));
+      }
+      let data;
+      try {
+        data = await calcularRanking(inicio, fim);
+      } catch (e) {
+        if (!(e instanceof Preparando)) throw e;
+        res.writeHead(202, { "content-type": "application/json; charset=utf-8" });
+        return res.end(JSON.stringify(e.info));
+      }
       data.equipes = lerEquipes();
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       return res.end(JSON.stringify(data));
